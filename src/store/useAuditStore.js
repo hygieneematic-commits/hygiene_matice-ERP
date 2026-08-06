@@ -1,9 +1,9 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { generateId } from "../utils/id";
 
 export const useAuditStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       logs: [],
 

@@ -18,7 +18,7 @@ export default function BatchHistory() {
   const { batches, deleteBatch } = useProductionStore();
   const products = useProductStore((s) => s.products);
   const push = useToastStore((s) => s.push);
-  const { canEdit } = usePermissions();
+  const { role } = usePermissions();
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -71,7 +71,10 @@ export default function BatchHistory() {
       header: "",
       align: "right",
       render: (row) =>
-        row.status === "planned" && canEdit && (
+        // Only Super Admin can delete a batch record — every other role that
+        // can reach this page (Production Manager/Staff, QC) can view/manage
+        // batches but must not be able to erase history.
+        row.status === "planned" && role === "Super Admin" && (
           <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors">
             <Trash2 size={15} />
           </button>

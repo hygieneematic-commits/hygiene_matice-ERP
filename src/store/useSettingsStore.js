@@ -1,9 +1,9 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedSettings } from "../data/seedMisc";
 
 export const useSettingsStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       settings: seedSettings,
       updateSettings: (patch) => set({ settings: { ...get().settings, ...patch } }),

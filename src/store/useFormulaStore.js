@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedFormulas } from "../data/seedFormulas";
 import { generateId } from "../utils/id";
 
@@ -13,7 +13,7 @@ Object.entries(seedFormulas).forEach(([productId, ingredients]) => {
 });
 
 export const useFormulaStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       formulasByProductId: initialFormulas,
 

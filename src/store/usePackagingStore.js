@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedPackaging } from "../data/seedPackaging";
 import { generateId } from "../utils/id";
 
 export const usePackagingStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       packagingItems: seedPackaging,
 

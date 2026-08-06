@@ -65,10 +65,6 @@ export default function Login() {
             </Button>
           </form>
         </div>
-
-        <p className="text-xs text-ink-400 text-center mt-5">
-          Demo credentials — <span className="font-mono">aarav / admin123</span> (Super Admin)
-        </p>
       </div>
     </div>
   );

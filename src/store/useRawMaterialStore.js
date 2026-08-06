@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedRawMaterials } from "../data/seedRawMaterials";
 import { generateId } from "../utils/id";
 import { round } from "../utils/units";
@@ -17,7 +17,7 @@ export function withFinalPrice(data) {
 }
 
 export const useRawMaterialStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       rawMaterials: seedRawMaterials,
 
@@ -55,12 +55,10 @@ export const useRawMaterialStore = create(
     }),
     {
       name: "hm-raw-materials",
-      // v2: earlier builds could persist a material with price stuck at 0
-      // (e.g. RO Water saved before the GST-aware price calc existed). Any
-      // browser still holding a v1 cache gets a clean reseed instead of
-      // silently showing a stale ₹0.00 unit price forever.
-      version: 2,
-      migrate: (persisted, version) => (version < 2 ? { rawMaterials: seedRawMaterials } : persisted),
+      // The v1/v2 stale-price bug (RO Water stuck at ₹0.00 from an old
+      // localStorage cache) is structurally gone now that Firestore is the
+      // single source of truth for every device — no per-browser cache left
+      // to go stale, so the version/migrate workaround is no longer needed.
     }
   )
 );

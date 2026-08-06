@@ -3,6 +3,10 @@ import { persist } from "zustand/middleware";
 import { useUserStore } from "./useUserStore";
 import { useAuditStore } from "./useAuditStore";
 
+// Deliberately still localStorage (not firestoreSync) — WHO is logged in on
+// THIS device is per-browser session state, not shared data. Logging in on
+// a phone should never auto-log-in a laptop. useUserStore (the actual user
+// list/roster) is the one that's Firestore-synced.
 export const useAuthStore = create(
   persist(
     (set) => ({

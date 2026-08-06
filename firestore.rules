@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// -----------------------------------------------------------------------
+// NOT YET ACTIVE — apply this in Firebase Console → Firestore Database →
+// Rules → paste & Publish, but only AFTER enabling Anonymous sign-in:
+// Firebase Console → Authentication → Sign-in method → Anonymous → Enable.
+//
+// Once Anonymous auth is on, the app (lib/firebase.js) automatically signs
+// every visitor in behind the scenes — no UI change, no extra click, your
+// existing employee login screen (username/password) is unaffected. This
+// just stops raw internet bots/scripts from hitting the Firestore API with
+// no browser at all. Publishing this BEFORE enabling Anonymous sign-in
+// will lock the app out of its own data (nobody will have request.auth).
+//
+// This is a lightweight gate, not full production-grade access control —
+// see the comment above `authReady` in src/lib/firebase.js for exactly
+// what it does and doesn't protect against.
+// -----------------------------------------------------------------------
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /erp-stores/{storeName} {
+      // Any signed-in user (via Firebase Auth) can read every store —
+      // matches today's RBAC model, which is enforced in the UI layer
+      // (utils/permissions.js), not per-document. Only signed-in users
+      // may write at all; page-level edit permission is still enforced
+      // client-side same as it is today.
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+  }
+}

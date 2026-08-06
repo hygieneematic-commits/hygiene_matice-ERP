@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedUsers } from "../data/seedMisc";
 import { generateId } from "../utils/id";
 
 export const useUserStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       users: seedUsers,
 

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedBatchHistory } from "../data/seedMisc";
 import { generateId, generateBatchNumber } from "../utils/id";
 import { useFormulaStore } from "./useFormulaStore";
@@ -9,7 +9,7 @@ import { useProductStore } from "./useProductStore";
 import { scaleFormula, calculateComponentPlanCost } from "../utils/costEngine";
 
 export const useProductionStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       batches: seedBatchHistory,
 

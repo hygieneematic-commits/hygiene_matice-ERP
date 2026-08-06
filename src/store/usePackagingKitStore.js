@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { firestoreSync } from "./middleware/firestoreSync";
 import { seedPackagingKits } from "../data/seedPackagingKits";
 import { generateId } from "../utils/id";
 
@@ -21,7 +21,7 @@ function withPrice(data) {
 }
 
 export const usePackagingKitStore = create(
-  persist(
+  firestoreSync(
     (set, get) => ({
       packagingKits: seedPackagingKits,
 
