@@ -99,10 +99,15 @@ export function calculateOverheadCost(batchLiters, settings) {
  * Full cost breakdown for a product at a given batch size.
  * This is THE function most pages should call.
  */
-export function calculateFullCost({ product, formula, batchLiters, rawMaterialsById, packagingById, settings }) {
+export function calculateFullCost({ product, formula, batchLiters, rawMaterialsById, packagingById, settings, packagingOverride }) {
   const scaledIngredients = scaleFormula(formula?.ingredients || [], batchLiters, rawMaterialsById);
   const rawMaterialCost = calculateRawMaterialCost(scaledIngredients, rawMaterialsById);
-  const packagingCost = calculatePackagingCost(product, batchLiters, packagingById);
+  // If the user has picked packaging explicitly for this batch (packagingOverride —
+  // the component-based plan from the Batch Calculator/New Batch screen), that is
+  // the ONLY packaging cost counted. Otherwise fall back to the product's default
+  // packagingBOM. The two are never summed together — that was the double-count
+  // bug that made Cost per Liter/Margin wrong whenever a custom plan was used.
+  const packagingCost = packagingOverride ?? calculatePackagingCost(product, batchLiters, packagingById);
   const overhead = calculateOverheadCost(batchLiters, settings);
 
   const totalCost = round(rawMaterialCost.total + packagingCost.total + overhead.total, 2);

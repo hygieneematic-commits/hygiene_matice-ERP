@@ -11,7 +11,7 @@ import { useFormulaStore } from "../../store/useFormulaStore";
 import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
 import { useSettingsStore } from "../../store/useSettingsStore";
-import { calculateFullCost, calculateSellingMetrics, scaleFormula, humanizeQuantity } from "../../utils/costEngine";
+import { calculateFullCost, calculateSellingMetrics, calculateComponentPlanCost, scaleFormula, humanizeQuantity } from "../../utils/costEngine";
 import { formatCurrency, formatDate, pct } from "../../utils/formatters";
 import { exportTableToPDF } from "../../utils/pdfExport";
 import { exportTableToExcel } from "../../utils/excelExport";
@@ -79,7 +79,9 @@ export default function Reports() {
       const product = products.find((p) => p.id === b.productId);
       const formula = getFormula(b.productId);
       if (!product) return [b.batchNumber, "Unknown", `${b.quantityL} L`, "—", "—", "—"];
-      const cost = calculateFullCost({ product, formula, batchLiters: b.quantityL, rawMaterialsById, packagingById, settings });
+      const componentPlan = calculateComponentPlanCost(b.packagingPlan, packagingById);
+      const packagingOverride = componentPlan.breakdown.length > 0 ? componentPlan : undefined;
+      const cost = calculateFullCost({ product, formula, batchLiters: b.quantityL, rawMaterialsById, packagingById, settings, packagingOverride });
       const metrics = calculateSellingMetrics({
         sellingPricePerL: product.sellingPricePerL,
         costPerLiter: cost.costPerLiter,
