@@ -162,11 +162,18 @@ export function computeGrandTotal({ rawMaterialTotal, packagingTotal, overheadTo
 // both resolve to a single exact per-Liter figure before anything else runs.
 // GST can be included in the entered price or added on top of it.
 // ---------------------------------------------------------------------------
-export function resolveSellingPricePerLiter({ mode, value, batchLiters }) {
+export function resolveSellingPricePerLiter({ mode, value, batchLiters, unitLiters }) {
   const v = safeNumber(value);
   if (mode === "total") {
     const liters = safeNumber(batchLiters);
     return liters > 0 ? v / liters : 0;
+  }
+  if (mode === "perUnit") {
+    // v = price per packaging unit (e.g. ₹350 per 5L bottle) → convert using
+    // the actual bottle capacity, not batchLiters/bottleCount (which can be
+    // off due to the last partial bottle), so the conversion is exact.
+    const litersPerUnit = safeNumber(unitLiters);
+    return litersPerUnit > 0 ? v / litersPerUnit : 0;
   }
   return v; // mode === "perLiter"
 }

@@ -53,6 +53,14 @@ export const useRawMaterialStore = create(
 
       lowStockItems: () => get().rawMaterials.filter((r) => r.stock <= r.minStock),
     }),
-    { name: "hm-raw-materials" }
+    {
+      name: "hm-raw-materials",
+      // v2: earlier builds could persist a material with price stuck at 0
+      // (e.g. RO Water saved before the GST-aware price calc existed). Any
+      // browser still holding a v1 cache gets a clean reseed instead of
+      // silently showing a stale ₹0.00 unit price forever.
+      version: 2,
+      migrate: (persisted, version) => (version < 2 ? { rawMaterials: seedRawMaterials } : persisted),
+    }
   )
 );

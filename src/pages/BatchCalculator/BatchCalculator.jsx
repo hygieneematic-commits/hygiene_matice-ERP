@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { Beaker, PackageOpen, Receipt, IndianRupee, ClipboardList, FlaskConical } from "lucide-react";
+import { Beaker, PackageOpen, Receipt, IndianRupee, ClipboardList, FlaskConical, ChevronRight, ChevronDown, ListTree } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
 import { Select, Input, Label } from "../../components/ui/Field";
@@ -135,7 +135,17 @@ export default function BatchCalculator() {
   }
 
   // ---- STEP 6: Selling Price & GST ----
-  const [sellingMode, setSellingMode] = useState("perLiter"); // "perLiter" | "total"
+  // sellingValue is bound directly to what the user types — it is NEVER
+  // reformatted, rounded, or overwritten by a computed value on every
+  // keystroke. It only changes when the user types, picks a preset, or
+  // switches product. This is the fix for the "50 turns into 49.xx while
+  // typing" bug: that symptom comes from feeding a rounded/derived number
+  // back into the input's `value`, which this component never does.
+  // Defaults to "perLiter" (matches the product's stored sellingPricePerL
+  // exactly, no conversion needed) — "Per Packaging Unit" is offered as the
+  // recommended option but switching to it starts from the converted value
+  // rather than silently reinterpreting whatever number is already typed.
+  const [sellingMode, setSellingMode] = useState("perLiter"); // "perUnit" | "perLiter" | "total"
   const [sellingValue, setSellingValue] = useState(String(product?.sellingPricePerL ?? ""));
   const [gstMode, setGstMode] = useState("exclude"); // "exclude" | "include"
   const [gstPercent, setGstPercent] = useState(String((settings.cgstPercent ?? 9) + (settings.sgstPercent ?? 9)));
@@ -145,6 +155,18 @@ export default function BatchCalculator() {
     setSellingValue(String(product?.sellingPricePerL ?? ""));
     setSellingMode("perLiter");
   }, [productId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Switching basis converts the *currently displayed* number so it keeps
+  // meaning the same real price, instead of reinterpreting the raw digits
+  // under a new unit (which would silently 10x/5x the price).
+  function handleSellingModeChange(nextMode) {
+    const currentPerLiter = resolveSellingPricePerLiter({ mode: sellingMode, value: sellingValue, batchLiters, unitLiters });
+    let nextValue = currentPerLiter;
+    if (nextMode === "total") nextValue = currentPerLiter * safeNumber(batchLiters);
+    else if (nextMode === "perUnit") nextValue = currentPerLiter * safeNumber(unitLiters);
+    setSellingValue(nextValue > 0 ? String(Math.round(nextValue * 100) / 100) : "");
+    setSellingMode(nextMode);
+  }
 
   function handlePreset(val) {
     setBatchLiters(val);
@@ -221,9 +243,10 @@ export default function BatchCalculator() {
   );
 
   // STEP 6 — GST Engine + Profit Engine
+  const unitLiters = selectedBottle ? selectedBottle.capacityMl / 1000 : 0;
   const sellingPricePerLiter = useMemo(
-    () => resolveSellingPricePerLiter({ mode: sellingMode, value: sellingValue, batchLiters }),
-    [sellingMode, sellingValue, batchLiters]
+    () => resolveSellingPricePerLiter({ mode: sellingMode, value: sellingValue, batchLiters, unitLiters }),
+    [sellingMode, sellingValue, batchLiters, unitLiters]
   );
   const effectiveGstPercent = safeNumber(gstPercent);
   const gstResult = useMemo(
@@ -433,48 +456,100 @@ export default function BatchCalculator() {
             <div className="px-5 py-4 border-b border-surface-border">
               <SectionLabel n={4} title="Cost Summary" icon={Receipt} noMargin />
             </div>
-            <div className="p-5 space-y-2.5 text-sm">
-              <Row label="Raw material cost" value={rawMaterialResult.totalCost} />
-              <Row label="Packaging cost" value={packagingResult.packagingTotal} />
-              <Row label="Labour" value={overheadResult.labourTotal} />
-              <Row label="Electricity" value={overheadResult.electricityTotal} />
-              <Row label="Transport" value={overheadResult.transportTotal} />
-              <Row label="Misc." value={overheadResult.miscTotal} />
+            <div className="p-5 space-y-3.5 text-sm">
+              <div>
+                <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wide mb-1.5">Raw Material</p>
+                <Row label="Total Raw Material Cost" value={rawMaterialResult.totalCost} />
+              </div>
+              <div className="border-t border-surface-border pt-3">
+                <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wide mb-1.5">Packaging</p>
+                <div className="space-y-1.5">
+                  <Row label="Bottle" value={packagingResult.bottleTotal} />
+                  {useCap && <Row label="Cap" value={packagingResult.capTotal} />}
+                  {useSticker && <Row label="Sticker" value={packagingResult.stickerTotal} />}
+                  {useOuterBox && <Row label="Outer Packaging" value={packagingResult.outerBoxTotal} />}
+                  {useShrink && <Row label="Shrink Wrap" value={packagingResult.shrinkTotal} />}
+                </div>
+              </div>
+              <div className="border-t border-surface-border pt-3">
+                <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wide mb-1.5">Manufacturing</p>
+                <div className="space-y-1.5">
+                  <Row label="Labour" value={overheadResult.labourTotal} />
+                  <Row label="Electricity" value={overheadResult.electricityTotal} />
+                  <Row label="Transport" value={overheadResult.transportTotal} />
+                  <Row label="Miscellaneous" value={overheadResult.miscTotal} />
+                </div>
+              </div>
               <div className="border-t border-surface-border !mt-3.5 pt-3.5 flex justify-between">
-                <span className="text-sm font-semibold text-ink-900">Grand Total Batch Cost</span>
+                <span className="text-sm font-semibold text-ink-900">Total Manufacturing Cost</span>
                 <span className="text-sm font-mono font-bold text-ink-900">{formatCurrency(grandTotalResult.grandTotal)}</span>
               </div>
-              <Row label="Cost Per Liter" value={grandTotalResult.costPerLiter} />
-              <Row label={`Cost Per Bottle (${bottleUnits} units)`} value={grandTotalResult.costPerBottle} />
+              <div className="bg-brand-50/60 rounded-xl p-3 space-y-1.5">
+                <Row label="Cost Per Liter" value={grandTotalResult.costPerLiter} />
+                <Row label={`Cost Per Packaging Unit (${bottleUnits} units)`} value={grandTotalResult.costPerBottle} />
+              </div>
             </div>
           </Card>
+
+          <CalculationBreakdown
+            batchLiters={batchLiters}
+            formulaLines={rawMaterialResult.lines}
+            rawMaterialTotal={rawMaterialResult.totalCost}
+            bottleUnits={bottleUnits}
+            selectedBottle={selectedBottle}
+            bottleCost={bottleCost}
+            packagingResult={packagingResult}
+            useCap={useCap}
+            useSticker={useSticker}
+            useOuterBox={useOuterBox}
+            useShrink={useShrink}
+            capCost={capCost}
+            stickerCost={stickerCost}
+            outerBoxCost={outerBoxCost}
+            shrinkCost={shrinkCost}
+            overheadResult={overheadResult}
+            grandTotalResult={grandTotalResult}
+          />
 
           {/* STEP 6 — Selling Price & Profit */}
           <Card>
             <SectionLabel n={5} title="Selling Price & Profit" icon={IndianRupee} />
             <div className="flex gap-2 mb-3">
               <button
-                onClick={() => setSellingMode("perLiter")}
+                onClick={() => handleSellingModeChange("perUnit")}
+                disabled={!selectedBottle}
+                className={clsx(
+                  "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40",
+                  sellingMode === "perUnit" ? "bg-brand-gradient text-white border-transparent" : "bg-white text-ink-600 border-surface-border"
+                )}
+                title="Recommended"
+              >
+                Per Packaging Unit
+              </button>
+              <button
+                onClick={() => handleSellingModeChange("perLiter")}
                 className={clsx(
                   "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
                   sellingMode === "perLiter" ? "bg-brand-gradient text-white border-transparent" : "bg-white text-ink-600 border-surface-border"
                 )}
               >
-                Price Per Liter
+                Per Liter
               </button>
               <button
-                onClick={() => setSellingMode("total")}
+                onClick={() => handleSellingModeChange("total")}
                 className={clsx(
                   "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
                   sellingMode === "total" ? "bg-brand-gradient text-white border-transparent" : "bg-white text-ink-600 border-surface-border"
                 )}
               >
-                Total Batch Selling Price
+                Whole Batch
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <Label hint={sellingMode === "total" ? "₹ / batch" : "₹ / Liter"}>Selling Price</Label>
+                <Label hint={sellingMode === "total" ? "₹ / batch" : sellingMode === "perUnit" ? "₹ / packaging unit" : "₹ / Liter"}>
+                  Selling Price
+                </Label>
                 <Input type="number" step="0.01" min="0" value={sellingValue} onChange={(e) => setSellingValue(e.target.value)} placeholder="e.g. 120" />
               </div>
               <div>
@@ -529,7 +604,7 @@ export default function BatchCalculator() {
               <Metric label={`GST (${effectiveGstPercent}%) /L`} value={formatCurrency(gstResult.gstAmountPerLiter)} />
               <Metric label="Net Profit /L" value={formatCurrency(profitResult.profitPerLiter)} tone={isProfit ? "success" : "danger"} />
               <Metric label="Margin / Markup" value={`${formatNumber(profitResult.marginPercent, 2)}% / ${formatNumber(profitResult.markupPercent, 2)}%`} />
-              <Metric label="Profit Per Bottle" value={formatCurrency(profitResult.profitPerBottle)} tone={isProfit ? "success" : "danger"} />
+              <Metric label="Profit Per Unit" value={formatCurrency(profitResult.profitPerBottle)} tone={isProfit ? "success" : "danger"} />
               <Metric label="ROI %" value={`${formatNumber(profitResult.roiPercent, 2)}%`} />
               <Metric label="Contribution Margin" value={`${formatNumber(profitResult.contributionMarginPercent, 2)}%`} />
               <Metric label="Total Batch Profit" value={formatCurrency(profitResult.netProfitTotal)} tone={isProfit ? "success" : "danger"} />
@@ -547,13 +622,13 @@ export default function BatchCalculator() {
             </p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-sm border-t border-white/20 pt-4">
               <SummaryStat label="Batch Size" value={`${batchLiters} L`} />
-              <SummaryStat label="Bottle Qty" value={`${bottleUnits} units`} />
+              <SummaryStat label="Packaging Units" value={`${bottleUnits} units`} />
               <SummaryStat label="Grand Cost" value={formatCurrency(grandTotalResult.grandTotal)} />
               <SummaryStat label="Selling Price /L" value={formatCurrency(gstResult.netPricePerLiter)} />
               <SummaryStat label="Net Margin" value={`${formatNumber(profitResult.marginPercent, 2)}%`} />
               <SummaryStat label="Markup" value={`${formatNumber(profitResult.markupPercent, 2)}%`} />
-              <SummaryStat label="Cost / Bottle" value={formatCurrency(grandTotalResult.costPerBottle)} />
-              <SummaryStat label="Profit / Bottle" value={formatCurrency(profitResult.profitPerBottle)} />
+              <SummaryStat label="Cost / Unit" value={formatCurrency(grandTotalResult.costPerBottle)} />
+              <SummaryStat label="Profit / Unit" value={formatCurrency(profitResult.profitPerBottle)} />
               <SummaryStat label="Total Batch Profit" value={formatCurrency(profitResult.netProfitTotal)} highlight />
             </div>
           </Card>
@@ -630,6 +705,129 @@ function OverheadField({ label, value, onChange }) {
     <div>
       <Label hint="₹">{label}</Label>
       <Input type="number" min="0" step="0.01" value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// STEP 7 — Calculation Breakdown. Collapsed by default (spec §7): pure
+// transparency, every number here is read straight from the same values
+// already computed above — nothing is recalculated separately, so this can
+// never drift out of sync with the totals shown elsewhere on the page.
+// ---------------------------------------------------------------------------
+function CalculationBreakdown({
+  batchLiters,
+  formulaLines,
+  rawMaterialTotal,
+  bottleUnits,
+  selectedBottle,
+  bottleCost,
+  packagingResult,
+  useCap,
+  useSticker,
+  useOuterBox,
+  useShrink,
+  capCost,
+  stickerCost,
+  outerBoxCost,
+  shrinkCost,
+  overheadResult,
+  grandTotalResult,
+}) {
+  const [open, setOpen] = useState(false);
+  const batchMl = safeNumber(batchLiters) * 1000;
+
+  return (
+    <Card padding="p-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 text-left"
+      >
+        <span className="text-sm font-semibold text-ink-900 flex items-center gap-2">
+          <ListTree size={15} className="text-brand-600" />
+          Calculation Breakdown
+        </span>
+        <span className="text-xs text-ink-400 flex items-center gap-1">
+          {open ? "Hide" : "Show"} Calculation Details
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-4 text-xs font-mono border-t border-surface-border pt-4">
+          <BreakdownSection title={`Formula — Batch Size ${formatNumber(batchLiters, 2)} L`}>
+            {formulaLines.map((l, i) => {
+              const pct = batchMl > 0 ? (l.requiredBaseQty / batchMl) * 100 : 0;
+              const qtyDisplay = l.requiredBaseQty >= 1000 ? `${formatNumber(l.requiredBaseQty / 1000, 3)} ${l.type === "weight" ? "Kg" : "L"}` : `${formatNumber(l.requiredBaseQty, 2)} ${l.type === "weight" ? "gm" : "ml"}`;
+              return (
+                <BreakdownLine key={i} left={`${l.rawMaterialName}  (${formatNumber(pct, 2)}%)`} right={qtyDisplay} />
+              );
+            })}
+          </BreakdownSection>
+
+          <BreakdownSection title="Raw Material Cost">
+            {formulaLines.map((l, i) => (
+              <BreakdownLine
+                key={i}
+                left={`${l.rawMaterialName}  ${formatNumber(l.largeUnitQty, 3)} × ${formatCurrency(l.unitPrice)}`}
+                right={formatCurrency(l.cost)}
+              />
+            ))}
+            <BreakdownTotal label="Raw Material Total" value={rawMaterialTotal} />
+          </BreakdownSection>
+
+          <BreakdownSection title="Packaging">
+            <BreakdownLine left={`Bottle (${selectedBottle?.name || "—"})  ${bottleUnits} × ${formatCurrency(bottleCost)}`} right={formatCurrency(packagingResult.bottleTotal)} />
+            {useCap && <BreakdownLine left={`Cap  ${bottleUnits} × ${formatCurrency(capCost)}`} right={formatCurrency(packagingResult.capTotal)} />}
+            {useSticker && <BreakdownLine left={`Sticker  ${bottleUnits} × ${formatCurrency(stickerCost)}`} right={formatCurrency(packagingResult.stickerTotal)} />}
+            {useOuterBox && (
+              <BreakdownLine left={`Outer Box  ${packagingResult.outerBoxCount} × ${formatCurrency(outerBoxCost)}`} right={formatCurrency(packagingResult.outerBoxTotal)} />
+            )}
+            {useShrink && <BreakdownLine left={`Shrink Wrap  ${bottleUnits} × ${formatCurrency(shrinkCost)}`} right={formatCurrency(packagingResult.shrinkTotal)} />}
+            <BreakdownTotal label="Packaging Total" value={packagingResult.packagingTotal} />
+          </BreakdownSection>
+
+          <BreakdownSection title="Manufacturing Overhead">
+            <BreakdownLine left="Labour" right={formatCurrency(overheadResult.labourTotal)} />
+            <BreakdownLine left="Electricity" right={formatCurrency(overheadResult.electricityTotal)} />
+            <BreakdownLine left="Transport" right={formatCurrency(overheadResult.transportTotal)} />
+            <BreakdownLine left="Miscellaneous" right={formatCurrency(overheadResult.miscTotal)} />
+            <BreakdownTotal label="Overhead Total" value={overheadResult.overheadTotal} />
+          </BreakdownSection>
+
+          <div className="bg-ink-900 text-white rounded-xl p-3.5 space-y-1.5">
+            <BreakdownLine left="Grand Total" right={formatCurrency(grandTotalResult.grandTotal)} dark />
+            <BreakdownLine left="Cost Per Packaging Unit" right={formatCurrency(grandTotalResult.costPerBottle)} dark />
+            <BreakdownLine left="Cost Per Liter" right={formatCurrency(grandTotalResult.costPerLiter)} dark />
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function BreakdownSection({ title, children }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold text-ink-400 uppercase tracking-wide mb-1.5">{title}</p>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function BreakdownLine({ left, right, dark }) {
+  return (
+    <div className={clsx("flex justify-between gap-3", dark ? "text-white/90" : "text-ink-600")}>
+      <span className="truncate">{left}</span>
+      <span className="shrink-0 font-semibold">{right}</span>
+    </div>
+  );
+}
+
+function BreakdownTotal({ label, value }) {
+  return (
+    <div className="flex justify-between border-t border-surface-border pt-1 mt-1 text-ink-900 font-semibold">
+      <span>{label}</span>
+      <span>{formatCurrency(value)}</span>
     </div>
   );
 }
