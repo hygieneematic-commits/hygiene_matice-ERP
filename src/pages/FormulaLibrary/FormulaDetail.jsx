@@ -147,7 +147,7 @@ export default function FormulaDetail() {
               <p className="text-xs text-ink-500 mb-1">Cost per Liter (raw materials only)</p>
               <p className="text-2xl font-bold font-display text-brand-700">{formatCurrency(costResult.total)}</p>
               <p className="text-[11px] text-ink-400 mt-2 leading-relaxed">
-                Full costing including packaging & overheads is available in the Batch Calculator and Cost & Profit pages.
+                Full costing including packaging & overheads is available in the Batch Calculator.
               </p>
             </div>
           </Card>

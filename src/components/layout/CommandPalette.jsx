@@ -16,7 +16,7 @@ const commands = [
   { label: "Go to Packaging", to: "/packaging", icon: PackageOpen, group: "Navigate" },
   { label: "Go to Production", to: "/production", icon: Factory, group: "Navigate" },
   { label: "Go to Inventory", to: "/inventory", icon: Warehouse, group: "Navigate" },
-  { label: "Go to Cost & Profit", to: "/cost-profit", icon: IndianRupee, group: "Navigate" },
+  { label: "Go to Sales Summary", to: "/cost-profit", icon: IndianRupee, group: "Navigate" },
   { label: "Go to Reports", to: "/reports", icon: FileBarChart, group: "Navigate" },
   { label: "Go to Batch History", to: "/batch-history", icon: History, group: "Navigate" },
   { label: "Go to Users", to: "/users", icon: Users, group: "Navigate" },

@@ -1,272 +1,260 @@
 import { useState, useMemo } from "react";
-import { IndianRupee, TrendingUp, TrendingDown } from "lucide-react";
+import { Users, Copy, Printer, Check, ChevronDown, ChevronRight } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
-import Badge from "../../components/ui/Badge";
-import { Select, Input, Label, FormRow } from "../../components/ui/Field";
+import { Select, Input, Label } from "../../components/ui/Field";
 import { useProductStore } from "../../store/useProductStore";
 import { useFormulaStore } from "../../store/useFormulaStore";
 import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
 import { useSettingsStore } from "../../store/useSettingsStore";
-import { calculateFullCost, calculateSellingMetrics } from "../../utils/costEngine";
-import { computeRawMaterialInputGst, estimatePackagingInputGst, computeGstLedger, safeNumber } from "../../utils/batchCalcEngine";
-import { formatCurrency, pct } from "../../utils/formatters";
+import { calculateFullCost } from "../../utils/costEngine";
+import { safeNumber } from "../../utils/batchCalcEngine";
+import { formatCurrency, formatNumber } from "../../utils/formatters";
 import clsx from "clsx";
 
+/**
+ * SALES SUMMARY — a salesman-facing reference card, not a costing tool.
+ * -----------------------------------------------------------------------
+ * This page used to be a generic "Cost & Profit" panel that duplicated what
+ * the Batch Calculator already does better (raw material breakdown, custom
+ * packaging, GST ledger, calculation breakdown). It had no purpose of its
+ * own, so it's been replaced with something that actually serves a
+ * different job: a clean, printable/copyable price card a salesperson can
+ * hand to a distributor or retailer without needing to explain a costing
+ * spreadsheet.
+ *
+ * Route/folder name (`/cost-profit`, `CostProfit/`) is kept unchanged so
+ * existing role permissions in `utils/permissions.js` don't need touching.
+ * -----------------------------------------------------------------------
+ */
 export default function CostProfit() {
   const products = useProductStore((s) => s.products);
   const { getFormula } = useFormulaStore();
   const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
-  const rawMaterialsById = useMemo(() => { const m = {}; rawMaterials.forEach((r) => (m[r.id] = r)); return m; }, [rawMaterials]);
+  const rawMaterialsById = useMemo(() => {
+    const m = {};
+    rawMaterials.forEach((r) => (m[r.id] = r));
+    return m;
+  }, [rawMaterials]);
   const packagingItemsAll = usePackagingStore((s) => s.packagingItems);
-  const packagingById = useMemo(() => { const m = {}; packagingItemsAll.forEach((p) => (m[p.id] = p)); return m; }, [packagingItemsAll]);
+  const packagingById = useMemo(() => {
+    const m = {};
+    packagingItemsAll.forEach((p) => (m[p.id] = p));
+    return m;
+  }, [packagingItemsAll]);
   const settings = useSettingsStore((s) => s.settings);
 
   const [productId, setProductId] = useState(products[0]?.id || "");
   const [batchLiters, setBatchLiters] = useState(50);
-  const [sellingPrice, setSellingPrice] = useState(null);
-  const [gstOverride, setGstOverride] = useState(false);
-  const [cgst, setCgst] = useState(settings.cgstPercent);
-  const [sgst, setSgst] = useState(settings.sgstPercent);
-  const [packagingGstPercent, setPackagingGstPercent] = useState("18"); // assumed rate — packaging items don't carry a per-item GST% yet
+  const [showAssumptions, setShowAssumptions] = useState(false);
+  const [manufacturerMargin, setManufacturerMargin] = useState("25"); // % margin the factory keeps on its ex-factory price
+  const [distributorMargin, setDistributorMargin] = useState("10"); // % distributor adds over ex-factory price
+  const [retailerMargin, setRetailerMargin] = useState("15"); // % retailer adds over distributor price
+  const [mrpBuffer, setMrpBuffer] = useState("10"); // % headroom above retailer price for the printed MRP
+  const [copied, setCopied] = useState(false);
 
   const product = products.find((p) => p.id === productId);
   const formula = getFormula(productId);
-  const effectivePrice = sellingPrice ?? product?.sellingPricePerL ?? 0;
 
   const result = useMemo(() => {
     if (!product) return null;
     return calculateFullCost({ product, formula, batchLiters, rawMaterialsById, packagingById, settings });
   }, [product, formula, batchLiters, rawMaterialsById, packagingById, settings]);
 
-  const metrics = useMemo(() => {
+  const summary = useMemo(() => {
     if (!result) return null;
-    return calculateSellingMetrics({
-      sellingPricePerL: Number(effectivePrice),
-      costPerLiter: result.costPerLiter,
-      directCostPerLiter: result.directCostPerLiter,
-      batchLiters,
-      settings: gstOverride ? { cgstPercent: Number(cgst), sgstPercent: Number(sgst) } : settings,
-    });
-  }, [result, effectivePrice, batchLiters, gstOverride, cgst, sgst, settings]);
+    const units = safeNumber(result.packagingCost.unitsProduced);
+    const costPerUnit = units > 0 ? safeNumber(result.totalCost) / units : 0;
 
-  // ---- GST Ledger: Input GST (on purchases) vs Output GST (on sale) ----
-  const inputGstRawResult = useMemo(() => {
-    if (!result) return { lines: [], total: 0 };
-    const lines = result.rawMaterialCost.breakdown.map((line) => ({
-      rawMaterial: rawMaterialsById[line.rawMaterialId],
-      largeUnitQty: line.scaledBaseQty / 1000,
-    }));
-    return computeRawMaterialInputGst(lines);
-  }, [result, rawMaterialsById]);
-  const inputGstPackagingResult = useMemo(
-    () => estimatePackagingInputGst(result?.packagingCost?.total, packagingGstPercent),
-    [result, packagingGstPercent]
-  );
-  const outputGstTotal = safeNumber(metrics?.totalGstPerL) * safeNumber(batchLiters);
-  const gstLedger = useMemo(
-    () =>
-      computeGstLedger({
-        outputGstTotal,
-        inputGstRawMaterial: inputGstRawResult.total,
-        inputGstPackaging: inputGstPackagingResult.gstAmount,
-      }),
-    [outputGstTotal, inputGstRawResult, inputGstPackagingResult]
-  );
+    const mMargin = Math.min(safeNumber(manufacturerMargin), 99); // guard against /0 at 100%
+    const recommendedSellingPrice = mMargin < 100 ? costPerUnit / (1 - mMargin / 100) : costPerUnit;
+    const minSellingPrice = costPerUnit; // break-even — anything below this is a real loss
 
-  function marginTone(margin) {
-    if (margin >= 25) return "success";
-    if (margin >= 10) return "warning";
-    return "danger";
+    const distributorPrice = recommendedSellingPrice * (1 + safeNumber(distributorMargin) / 100);
+    const retailerPrice = distributorPrice * (1 + safeNumber(retailerMargin) / 100);
+    const mrp = retailerPrice * (1 + safeNumber(mrpBuffer) / 100);
+
+    const profitPerUnit = recommendedSellingPrice - costPerUnit;
+    const totalBatchProfit = profitPerUnit * units;
+    const profitMarginPercent = recommendedSellingPrice > 0 ? (profitPerUnit / recommendedSellingPrice) * 100 : 0;
+
+    return {
+      units,
+      costPerUnit,
+      recommendedSellingPrice,
+      minSellingPrice,
+      distributorPrice,
+      retailerPrice,
+      mrp,
+      profitPerUnit,
+      totalBatchProfit,
+      profitMarginPercent,
+    };
+  }, [result, manufacturerMargin, distributorMargin, retailerMargin, mrpBuffer]);
+
+  const packSizeLabel = product?.packSizeMl >= 1000 ? `${product.packSizeMl / 1000} L` : `${product?.packSizeMl || 0} ml`;
+
+  function buildPlainTextSummary() {
+    if (!product || !summary) return "";
+    return [
+      `SALES SUMMARY — ${product.name}`,
+      `Batch Size: ${batchLiters} L   |   Packaging: ${packSizeLabel}   |   Units Produced: ${summary.units}`,
+      ``,
+      `Manufacturing Cost / Unit:   ${formatCurrency(summary.costPerUnit)}`,
+      `Minimum Selling Price:       ${formatCurrency(summary.minSellingPrice)}  (break-even, avoid below this)`,
+      `Recommended Selling Price:   ${formatCurrency(summary.recommendedSellingPrice)}  (ex-factory)`,
+      ``,
+      `Suggested Distributor Price: ${formatCurrency(summary.distributorPrice)}`,
+      `Suggested Retailer Price:    ${formatCurrency(summary.retailerPrice)}`,
+      `Suggested MRP:               ${formatCurrency(summary.mrp)}`,
+      ``,
+      `Expected Profit / Unit:      ${formatCurrency(summary.profitPerUnit)}`,
+      `Total Batch Profit:          ${formatCurrency(summary.totalBatchProfit)}`,
+      `Profit Margin:               ${formatNumber(summary.profitMarginPercent, 2)}%`,
+    ].join("\n");
   }
 
-  function handleProductChange(id) {
-    setProductId(id);
-    setSellingPrice(null);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(buildPlainTextSummary());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // clipboard permission denied — silently ignore, the Print option still works
+    }
+  }
+
+  function handlePrint() {
+    window.print();
   }
 
   return (
     <div>
-      <PageHeader title="Cost & Profit" subtitle="Model selling price, GST, and profitability for any product and batch size" />
+      <PageHeader title="Sales Summary" subtitle="A quick reference card your sales team can share with distributors and retailers" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card className="lg:col-span-1 h-fit">
-          <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-4">Inputs</p>
+        <Card className="lg:col-span-1 h-fit print:hidden">
+          <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-4">Product</p>
           <div className="space-y-4">
             <div>
               <Label>Product</Label>
-              <Select value={productId} onChange={(e) => handleProductChange(e.target.value)}>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              <Select value={productId} onChange={(e) => setProductId(e.target.value)}>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
               </Select>
             </div>
             <div>
               <Label hint="Liters">Batch Size</Label>
-              <Input type="number" step="1" value={batchLiters} onChange={(e) => setBatchLiters(Number(e.target.value) || 0)} />
+              <Input type="number" min="1" step="1" value={batchLiters} onChange={(e) => setBatchLiters(Number(e.target.value) || 0)} />
             </div>
-            <div>
-              <Label hint="Pre-GST, per Liter">Selling Price</Label>
-              <Input type="number" step="0.01" value={effectivePrice} onChange={(e) => setSellingPrice(Number(e.target.value))} />
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-ink-600 cursor-pointer">
-              <input type="checkbox" checked={gstOverride} onChange={(e) => setGstOverride(e.target.checked)} className="w-4 h-4 accent-brand-600 rounded" />
-              Override GST for this product
-            </label>
-            {gstOverride && (
-              <FormRow cols={2}>
-                <div>
-                  <Label hint="%">CGST</Label>
-                  <Input type="number" step="0.1" value={cgst} onChange={(e) => setCgst(e.target.value)} />
-                </div>
-                <div>
-                  <Label hint="%">SGST</Label>
-                  <Input type="number" step="0.1" value={sgst} onChange={(e) => setSgst(e.target.value)} />
-                </div>
-              </FormRow>
-            )}
           </div>
+
+          <button
+            onClick={() => setShowAssumptions((v) => !v)}
+            className="w-full flex items-center justify-between mt-6 pt-4 border-t border-surface-border text-xs font-semibold text-ink-400 uppercase tracking-wide"
+          >
+            Pricing Assumptions
+            {showAssumptions ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </button>
+          {showAssumptions && (
+            <div className="space-y-3 mt-3">
+              <AssumptionField label="Manufacturer margin" hint="on ex-factory price" value={manufacturerMargin} onChange={setManufacturerMargin} />
+              <AssumptionField label="Distributor margin" hint="over ex-factory price" value={distributorMargin} onChange={setDistributorMargin} />
+              <AssumptionField label="Retailer margin" hint="over distributor price" value={retailerMargin} onChange={setRetailerMargin} />
+              <AssumptionField label="MRP buffer" hint="over retailer price" value={mrpBuffer} onChange={setMrpBuffer} />
+            </div>
+          )}
         </Card>
 
-        <div className="lg:col-span-2 space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <MiniStat label="Cost / Liter" value={formatCurrency(result?.costPerLiter)} />
-            <MiniStat label="Selling Price" value={formatCurrency(effectivePrice)} />
-            <MiniStat label="Price incl. GST" value={formatCurrency(metrics?.priceWithGst)} />
-            <MiniStat label="Margin" value={pct(metrics?.marginPercent)} tone={marginTone(metrics?.marginPercent || 0)} />
-          </div>
+        <div className="lg:col-span-2">
+          {product && summary && (
+            <Card className="print:shadow-none print:border-none">
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <p className="text-xs font-semibold text-brand-600 uppercase tracking-wide mb-1">Sales Summary</p>
+                  <h2 className="text-2xl font-bold font-display text-ink-900">{product.name}</h2>
+                </div>
+                <div className="flex gap-2 print:hidden">
+                  <button
+                    onClick={handleCopy}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-surface-border bg-white text-ink-600 hover:border-brand-300"
+                  >
+                    {copied ? <Check size={13} className="text-success-600" /> : <Copy size={13} />}
+                    {copied ? "Copied" : "Copy Summary"}
+                  </button>
+                  <button
+                    onClick={handlePrint}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-surface-border bg-white text-ink-600 hover:border-brand-300"
+                  >
+                    <Printer size={13} />
+                    Print
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-ink-500 mb-5">
+                Batch {batchLiters} L &middot; Packaging {packSizeLabel} &middot; {summary.units} units produced
+              </p>
 
-          <Card>
-            <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-4">GST Breakdown (per Liter)</p>
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="bg-ink-900/[0.03] rounded-xl py-4">
-                <p className="text-xs text-ink-500 mb-1">CGST ({metrics?.cgstPercent}%)</p>
-                <p className="font-mono font-semibold text-ink-900">{formatCurrency(metrics?.cgstAmount)}</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+                <FactCell label="Manufacturing Cost / Unit" value={formatCurrency(summary.costPerUnit)} />
+                <FactCell label="Minimum Selling Price" value={formatCurrency(summary.minSellingPrice)} sub="break-even — avoid below this" tone="warning" />
+                <FactCell label="Recommended Selling Price" value={formatCurrency(summary.recommendedSellingPrice)} sub="ex-factory" tone="brand" />
               </div>
-              <div className="bg-ink-900/[0.03] rounded-xl py-4">
-                <p className="text-xs text-ink-500 mb-1">SGST ({metrics?.sgstPercent}%)</p>
-                <p className="font-mono font-semibold text-ink-900">{formatCurrency(metrics?.sgstAmount)}</p>
-              </div>
-              <div className="bg-brand-gradient-soft rounded-xl py-4">
-                <p className="text-xs text-brand-700 mb-1">Total GST</p>
-                <p className="font-mono font-semibold text-brand-700">{formatCurrency(metrics?.totalGstPerL)}</p>
-              </div>
-            </div>
-          </Card>
 
-          <Card>
-            <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-1">GST Ledger — Input vs Output</p>
-            <p className="text-xs text-ink-500 mb-4">
-              GST paid while purchasing raw material/packaging is reclaimable Input Tax Credit — it's netted off against
-              the GST you collect on sale, not treated as a cost.
-            </p>
-            <div className="space-y-2 text-sm mb-4">
-              <div className="flex justify-between">
-                <span className="text-ink-500">Input GST — Raw Material (actual)</span>
-                <span className="font-mono font-medium text-ink-900">{formatCurrency(inputGstRawResult.total)}</span>
+              <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wide mb-2">Trade Price Chain</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+                <FactCell label="Suggested Distributor Price" value={formatCurrency(summary.distributorPrice)} />
+                <FactCell label="Suggested Retailer Price" value={formatCurrency(summary.retailerPrice)} />
+                <FactCell label="Suggested MRP" value={formatCurrency(summary.mrp)} tone="ink" />
               </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-ink-500 flex items-center gap-1.5">
-                  Input GST — Packaging
-                  <span className="inline-flex items-center gap-1">
-                    (assumed
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={packagingGstPercent}
-                      onChange={(e) => setPackagingGstPercent(e.target.value)}
-                      className="w-12 px-1 py-0.5 border border-surface-border rounded text-xs text-center"
-                    />
-                    %)
-                  </span>
-                </span>
-                <span className="font-mono font-medium text-ink-900">{formatCurrency(inputGstPackagingResult.gstAmount)}</span>
-              </div>
-              <div className="flex justify-between border-t border-surface-border pt-2">
-                <span className="font-semibold text-ink-900">Total Input GST (ITC available)</span>
-                <span className="font-mono font-bold text-ink-900">{formatCurrency(gstLedger.totalInputGst)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-ink-500">Output GST (charged to customer)</span>
-                <span className="font-mono font-medium text-ink-900">{formatCurrency(gstLedger.output)}</span>
-              </div>
-            </div>
-            <div
-              className={clsx(
-                "rounded-xl p-3.5 flex justify-between items-center",
-                gstLedger.isCredit ? "bg-success-50" : "bg-brand-50/60"
-              )}
-            >
-              <span className="text-sm font-semibold text-ink-900">
-                {gstLedger.isCredit ? "Net ITC Credit Carried Forward" : "Net GST Payable"}
-              </span>
-              <span className={clsx("font-mono font-bold text-lg", gstLedger.isCredit ? "text-success-600" : "text-ink-900")}>
-                {formatCurrency(Math.abs(gstLedger.netGstPayable))}
-              </span>
-            </div>
-          </Card>
 
-          <Card>
-            <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-4">
-              Profitability — {batchLiters}L batch
-            </p>
-            <div className="grid grid-cols-2 gap-4">
-              <ProfitBox
-                label="Gross Profit"
-                sub="Revenue − direct materials"
-                perL={metrics?.grossProfitPerL}
-                total={metrics?.grossProfitTotal}
-                positive={metrics?.grossProfitPerL >= 0}
-              />
-              <ProfitBox
-                label="Net Profit"
-                sub="Revenue − all costs"
-                perL={metrics?.netProfitPerL}
-                total={metrics?.netProfitTotal}
-                positive={metrics?.netProfitPerL >= 0}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-surface-border">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-ink-500">Margin</span>
-                <Badge tone={marginTone(metrics?.marginPercent || 0)}>{pct(metrics?.marginPercent)}</Badge>
+              <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wide mb-2">Profitability</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <FactCell label="Expected Profit / Unit" value={formatCurrency(summary.profitPerUnit)} tone={summary.profitPerUnit >= 0 ? "success" : "danger"} />
+                <FactCell label="Total Batch Profit" value={formatCurrency(summary.totalBatchProfit)} tone={summary.totalBatchProfit >= 0 ? "success" : "danger"} />
+                <FactCell label="Profit Margin" value={`${formatNumber(summary.profitMarginPercent, 2)}%`} tone={summary.profitMarginPercent >= 0 ? "success" : "danger"} />
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-ink-500">Markup</span>
-                <Badge tone="brand">{pct(metrics?.markupPercent)}</Badge>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function MiniStat({ label, value, tone }) {
+function AssumptionField({ label, hint, value, onChange }) {
+  return (
+    <div>
+      <Label hint={hint}>{label}</Label>
+      <Input type="number" min="0" step="0.5" value={value} onChange={(e) => onChange(e.target.value)} className="!py-1.5 !text-sm" />
+    </div>
+  );
+}
+
+function FactCell({ label, value, sub, tone = "ink" }) {
   const toneClass = {
+    ink: "text-ink-900",
+    brand: "text-brand-700",
     success: "text-success-600",
     warning: "text-warning-600",
     danger: "text-danger-600",
   }[tone];
+  const bgClass = {
+    ink: "bg-ink-900/[0.02]",
+    brand: "bg-brand-50/60",
+    success: "bg-success-50",
+    warning: "bg-warning-50",
+    danger: "bg-danger-50",
+  }[tone];
   return (
-    <Card padding="p-4">
-      <p className="text-xs text-ink-500 mb-1">{label}</p>
-      <p className={clsx("text-lg font-bold font-display", toneClass || "text-ink-900")}>{value}</p>
-    </Card>
-  );
-}
-
-function ProfitBox({ label, sub, perL, total, positive }) {
-  return (
-    <div className={clsx("rounded-xl p-4", positive ? "bg-success-50" : "bg-danger-50")}>
-      <div className="flex items-center gap-1.5 mb-1">
-        {positive ? <TrendingUp size={14} className="text-success-600" /> : <TrendingDown size={14} className="text-danger-600" />}
-        <p className={clsx("text-xs font-semibold", positive ? "text-success-700" : "text-danger-700")}>{label}</p>
-      </div>
-      <p className={clsx("text-xl font-bold font-display", positive ? "text-success-700" : "text-danger-700")}>{formatCurrency(total)}</p>
-      <p className="text-[11px] text-ink-500 mt-1">{formatCurrency(perL)} / L · {sub}</p>
+    <div className={clsx("rounded-xl p-3.5 border border-surface-border", bgClass)}>
+      <p className="text-[11px] text-ink-500 mb-1">{label}</p>
+      <p className={clsx("font-mono font-bold text-lg", toneClass)}>{value}</p>
+      {sub && <p className="text-[10px] text-ink-400 mt-0.5">{sub}</p>}
     </div>
   );
 }

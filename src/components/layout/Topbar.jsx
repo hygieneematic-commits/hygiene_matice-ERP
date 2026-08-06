@@ -6,7 +6,7 @@ import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
 import { useAuthStore } from "../../store/useAuthStore";
 
-export default function Topbar({ onMenuClick, onSearchClick }) {
+export default function Topbar({ onMenuClick, onSearchClick, className = "" }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const ref = useRef(null);
@@ -40,7 +40,7 @@ export default function Topbar({ onMenuClick, onSearchClick }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 h-[72px] bg-surface-bg/80 backdrop-blur-md border-b border-surface-border flex items-center justify-between px-4 sm:px-6 gap-4">
+    <header className={`sticky top-0 z-30 h-[72px] bg-surface-bg/80 backdrop-blur-md border-b border-surface-border flex items-center justify-between px-4 sm:px-6 gap-4 ${className}`}>
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <button onClick={onMenuClick} className="lg:hidden text-ink-700 shrink-0">
           <Menu size={22} />

@@ -31,7 +31,7 @@ const navItems = [
   { to: "/packaging", label: "Packaging", icon: PackageOpen },
   { to: "/production", label: "Production", icon: Factory },
   { to: "/inventory", label: "Inventory", icon: Warehouse },
-  { to: "/cost-profit", label: "Cost & Profit", icon: IndianRupee },
+  { to: "/cost-profit", label: "Sales Summary", icon: IndianRupee },
   { to: "/reports", label: "Reports", icon: FileBarChart },
   { to: "/batch-history", label: "Batch History", icon: History },
   { to: "/users", label: "Users", icon: Users },
@@ -39,7 +39,7 @@ const navItems = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-export default function Sidebar({ open, onClose }) {
+export default function Sidebar({ open, onClose, className }) {
   const { role, isPageAllowed } = usePermissions();
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
@@ -58,7 +58,8 @@ export default function Sidebar({ open, onClose }) {
       <aside
         className={clsx(
           "fixed lg:sticky top-0 left-0 h-screen w-[264px] bg-white border-r border-surface-border flex flex-col z-50 transition-transform duration-300 shrink-0",
-          open ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+          className
         )}
       >
         <div className="flex items-center justify-between px-5 h-[72px] border-b border-surface-border">

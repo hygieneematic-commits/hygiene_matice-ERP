@@ -142,7 +142,7 @@ export default function Settings() {
                 <Input type="number" step="0.1" value={form.sgstPercent} onChange={(e) => set("sgstPercent", e.target.value)} />
               </div>
             </FormRow>
-            <p className="text-xs text-ink-400 mt-3">Individual products can override this in Cost & Profit.</p>
+            <p className="text-xs text-ink-400 mt-3">This default GST rate is used across the Batch Calculator, Dashboard, and Reports.</p>
           </Card>
 
           <Card>

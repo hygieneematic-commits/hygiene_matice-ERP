@@ -4,7 +4,7 @@ import { toBaseUnit, unitType, round } from "./units";
  * CORE ENGINE
  * Every cost/profit number shown anywhere in the app flows through these functions.
  * This guarantees that editing a raw material or packaging price instantly and
- * correctly ripples through Dashboard, Batch Calculator, Cost & Profit, and Reports.
+ * correctly ripples through Dashboard, Batch Calculator, Sales Summary, and Reports.
  *
  * Base formulas are always defined for 1 Liter. Scaling to any batch size (including
  * custom quantities) is a straight multiplication because ratios are preserved.
