@@ -1,0 +1,307 @@
+import { useState, useEffect, useRef } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import { Play, Pause, RotateCcw, CheckCircle2, Printer, XCircle } from "lucide-react";
+import Modal from "../../components/ui/Modal";
+import Button from "../../components/ui/Button";
+import Badge from "../../components/ui/Badge";
+import { Input, Label, Select } from "../../components/ui/Field";
+import { useProductStore } from "../../store/useProductStore";
+import { useProductionStore } from "../../store/useProductionStore";
+import { usePackagingKitStore } from "../../store/usePackagingKitStore";
+import { useUserStore } from "../../store/useUserStore";
+import { useToastStore } from "../../store/useToastStore";
+import { formatDate, formatCurrency } from "../../utils/formatters";
+
+// Manufacturing Process — sequential steps, each must be completed in order (spec §4)
+const PROCESS_STEPS = [
+  "Add Water",
+  "Add Active Ingredients (per formula)",
+  "Mix for 15 Minutes",
+  "Add Perfume",
+  "Add Colour",
+  "In-process QC Check",
+];
+
+// Quality Check checklist (spec §6)
+const QC_ITEMS = [
+  "PH Checked",
+  "Colour Checked",
+  "Fragrance Checked",
+  "Viscosity Checked",
+  "Appearance Checked",
+  "Bottle Filled",
+  "Cap Locked",
+  "Label Applied",
+  "Packing Completed",
+];
+
+export default function ProductionDetailModal({ open, onClose, batch }) {
+  const product = useProductStore((s) => (batch ? s.getById(batch.productId) : null));
+  const { confirmProduction, updateBatch } = useProductionStore();
+  const kitsById = usePackagingKitStore((s) => s.getByIdMap());
+  const users = useUserStore((s) => s.users);
+  const push = useToastStore((s) => s.push);
+
+  const [processChecked, setProcessChecked] = useState({});
+  const [qcChecked, setQcChecked] = useState({});
+  const [qcDecision, setQcDecision] = useState("approved");
+  const [approvedBy, setApprovedBy] = useState(users[0]?.name || "");
+  const [seconds, setSeconds] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [yieldPercent, setYieldPercent] = useState(100);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (open && batch) {
+      setProcessChecked({});
+      setQcChecked({});
+      setQcDecision("approved");
+      setApprovedBy(batch.qc?.approvedBy || users[0]?.name || "");
+      setSeconds(0);
+      setRunning(false);
+      setYieldPercent(batch.yieldPercent ?? 100);
+    }
+  }, [open, batch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (running) {
+      intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    return () => clearInterval(intervalRef.current);
+  }, [running]);
+
+  if (!batch) return null;
+
+  const allProcessDone = PROCESS_STEPS.every((_, i) => processChecked[i]);
+  const allQcDone = QC_ITEMS.every((_, i) => qcChecked[i]);
+  const isCompleted = batch.status === "completed";
+  const canConfirm = allProcessDone && allQcDone && qcDecision === "approved";
+
+  function formatTime(total) {
+    const m = String(Math.floor(total / 60)).padStart(2, "0");
+    const s = String(total % 60).padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
+  // Steps must be checked in order — this is what makes it a real "process", not a free-for-all list
+  function toggleProcessStep(idx) {
+    if (isCompleted) return;
+    const prevDone = idx === 0 || processChecked[idx - 1];
+    if (!prevDone && !processChecked[idx]) return;
+    setProcessChecked((c) => ({ ...c, [idx]: !c[idx] }));
+  }
+
+  function handleConfirm() {
+    updateBatch(batch.id, {
+      yieldPercent: Number(yieldPercent),
+      qc: {
+        items: QC_ITEMS.filter((_, i) => qcChecked[i]),
+        decision: qcDecision,
+        approvedBy,
+        approvalDate: new Date().toISOString(),
+      },
+    });
+    confirmProduction(batch.id);
+    push(`Batch ${batch.batchNumber} confirmed — inventory updated`);
+    onClose();
+  }
+
+  function handleReject() {
+    updateBatch(batch.id, {
+      status: "rejected",
+      qc: { items: QC_ITEMS.filter((_, i) => qcChecked[i]), decision: "rejected", approvedBy, approvalDate: new Date().toISOString() },
+    });
+    push(`Batch ${batch.batchNumber} marked as rejected by QC`, "warning");
+    onClose();
+  }
+
+  const qrPayload = JSON.stringify({
+    batch: batch.batchNumber,
+    product: product?.name,
+    qtyL: batch.quantityL,
+    mfg: batch.mfgDate,
+    exp: batch.expiryDate,
+  });
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={product?.name}
+      subtitle={`Batch ${batch.batchNumber} · ${batch.quantityL}L`}
+      size="xl"
+      footer={
+        !isCompleted &&
+        batch.status !== "rejected" && (
+          <>
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+            <Button variant="danger" onClick={handleReject} disabled={!allQcDone}>
+              <XCircle size={16} /> Reject
+            </Button>
+            <Button onClick={handleConfirm} disabled={!canConfirm}>
+              <CheckCircle2 size={16} /> Confirm Production
+            </Button>
+          </>
+        )
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-2 space-y-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Field label="Operator" value={batch.operator} />
+            <Field label="Supervisor" value={batch.supervisor || "—"} />
+            <Field label="Shift" value={batch.shift || "—"} />
+            <Field label="Mfg. Date" value={formatDate(batch.mfgDate)} />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-semibold text-ink-900">Manufacturing Process</p>
+              {isCompleted || batch.status === "rejected" ? (
+                <Badge tone={batch.status === "rejected" ? "danger" : "success"}>{batch.status === "rejected" ? "Rejected" : "Completed"}</Badge>
+              ) : (
+                <Badge tone={allProcessDone ? "success" : "warning"}>{Object.values(processChecked).filter(Boolean).length}/{PROCESS_STEPS.length}</Badge>
+              )}
+            </div>
+            <div className="space-y-2">
+              {PROCESS_STEPS.map((step, idx) => {
+                const locked = !isCompleted && idx > 0 && !processChecked[idx - 1];
+                return (
+                  <label
+                    key={idx}
+                    className={`flex items-center gap-3 border border-surface-border rounded-xl px-3.5 py-2.5 transition-colors ${
+                      locked ? "opacity-40 cursor-not-allowed" : "cursor-pointer hover:bg-ink-900/[0.02]"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isCompleted ? true : !!processChecked[idx]}
+                      disabled={isCompleted || locked}
+                      onChange={() => toggleProcessStep(idx)}
+                      className="w-4 h-4 rounded accent-brand-600"
+                    />
+                    <span className="text-sm text-ink-700">Step {idx + 1}: {step}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-semibold text-ink-900">Quality Check</p>
+              {!isCompleted && batch.status !== "rejected" && (
+                <Badge tone={allQcDone ? "success" : "warning"}>{Object.values(qcChecked).filter(Boolean).length}/{QC_ITEMS.length}</Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              {QC_ITEMS.map((item, idx) => (
+                <label key={idx} className="flex items-center gap-3 border border-surface-border rounded-xl px-3.5 py-2.5 cursor-pointer hover:bg-ink-900/[0.02] transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={isCompleted || batch.status === "rejected" ? batch.qc?.items?.includes(item) ?? false : !!qcChecked[idx]}
+                    disabled={isCompleted || batch.status === "rejected"}
+                    onChange={(e) => setQcChecked((c) => ({ ...c, [idx]: e.target.checked }))}
+                    className="w-4 h-4 rounded accent-brand-600"
+                  />
+                  <span className="text-sm text-ink-700">{item}</span>
+                </label>
+              ))}
+            </div>
+
+            {!isCompleted && batch.status !== "rejected" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <Label>QC Decision</Label>
+                  <Select value={qcDecision} onChange={(e) => setQcDecision(e.target.value)}>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Approved By</Label>
+                  <Select value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)}>
+                    {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <Label hint="%">Yield</Label>
+                  <Input type="number" step="0.1" max="100" value={yieldPercent} onChange={(e) => setYieldPercent(e.target.value)} />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 bg-ink-900/[0.02] rounded-xl p-3.5">
+                <Field label="QC Result" value={<Badge tone={batch.qc?.decision === "rejected" ? "danger" : "success"} dot>{batch.qc?.decision === "rejected" ? "Rejected" : "Approved"}</Badge>} />
+                <Field label="Approved By" value={batch.qc?.approvedBy || "—"} />
+                <Field label="Approval Date" value={batch.qc?.approvalDate ? formatDate(batch.qc.approvalDate) : "—"} />
+              </div>
+            )}
+          </div>
+
+          {batch.packagingPlan?.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-ink-900 mb-2">Packaging Distribution</p>
+              <div className="divide-y divide-surface-border border border-surface-border rounded-xl overflow-hidden">
+                {batch.packagingPlan.map((line, i) => {
+                  const kit = kitsById[line.packagingKitId];
+                  return (
+                    <div key={i} className="flex items-center justify-between px-3.5 py-2.5 text-sm">
+                      <span className="text-ink-700">{kit?.name || "Unknown packaging"}</span>
+                      <span className="font-mono font-semibold text-ink-900">
+                        {line.qty} × {formatCurrency(kit?.price)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {batch.notes && (
+            <div>
+              <p className="text-xs text-ink-400 mb-1">Remarks</p>
+              <p className="text-sm text-ink-700 bg-ink-900/[0.03] rounded-xl px-3.5 py-3">{batch.notes}</p>
+            </div>
+          )}
+
+          <div className="border border-surface-border rounded-xl p-4">
+            <p className="text-sm font-semibold text-ink-900 mb-3">Mixing Timer</p>
+            <div className="flex items-center gap-4">
+              <span className="text-3xl font-mono font-bold text-ink-900">{formatTime(seconds)}</span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setRunning((r) => !r)}>
+                  {running ? <Pause size={14} /> : <Play size={14} />} {running ? "Pause" : "Start"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setRunning(false); setSeconds(0); }}>
+                  <RotateCcw size={14} />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col items-center border border-surface-border rounded-xl p-5">
+          <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-3">Batch QR Code</p>
+          <div className="bg-white p-2 rounded-lg">
+            <QRCodeSVG value={qrPayload} size={140} fgColor="#0F172A" />
+          </div>
+          <p className="text-xs font-mono text-ink-500 mt-3">{batch.batchNumber}</p>
+          <Button size="sm" variant="secondary" className="mt-4 w-full" onClick={() => window.print()}>
+            <Printer size={14} /> Print Sheet
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Field({ label, value }) {
+  return (
+    <div>
+      <p className="text-xs text-ink-400 mb-1">{label}</p>
+      <p className="text-sm font-medium text-ink-900">{value}</p>
+    </div>
+  );
+}
