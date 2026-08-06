@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { Label, Input, Select, Textarea, FormRow } from "../../components/ui/Field";
@@ -17,7 +17,11 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
   const products = useProductStore((s) => s.products);
   const users = useUserStore((s) => s.users);
   const packagingKits = usePackagingKitStore((s) => s.packagingKits);
-  const kitsById = usePackagingKitStore((s) => s.getByIdMap());
+  const kitsById = useMemo(() => {
+    const map = {};
+    packagingKits.forEach((k) => (map[k.id] = k));
+    return map;
+  }, [packagingKits]);
   const { createBatch } = useProductionStore();
   const push = useToastStore((s) => s.push);
   const logAudit = useAuditStore((s) => s.log);

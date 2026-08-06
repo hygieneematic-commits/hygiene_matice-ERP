@@ -32,7 +32,11 @@ export default function BatchCalculator() {
   const packagingById = useMemo(() => { const m = {}; packagingItemsAll.forEach((p) => (m[p.id] = p)); return m; }, [packagingItemsAll]);
   const settings = useSettingsStore((s) => s.settings);
   const packagingKits = usePackagingKitStore((s) => s.packagingKits);
-  const kitsById = usePackagingKitStore((s) => s.getByIdMap());
+  const kitsById = useMemo(() => {
+    const map = {};
+    packagingKits.forEach((k) => (map[k.id] = k));
+    return map;
+  }, [packagingKits]);
 
   const [productId, setProductId] = useState(products[0]?.id || "");
   const [batchLiters, setBatchLiters] = useState(10);

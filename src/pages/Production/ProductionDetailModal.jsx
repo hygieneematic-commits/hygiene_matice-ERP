@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Play, Pause, RotateCcw, CheckCircle2, Printer, XCircle } from "lucide-react";
 import Modal from "../../components/ui/Modal";
@@ -38,7 +38,12 @@ const QC_ITEMS = [
 export default function ProductionDetailModal({ open, onClose, batch }) {
   const product = useProductStore((s) => (batch ? s.getById(batch.productId) : null));
   const { confirmProduction, updateBatch } = useProductionStore();
-  const kitsById = usePackagingKitStore((s) => s.getByIdMap());
+  const packagingKits = usePackagingKitStore((s) => s.packagingKits);
+  const kitsById = useMemo(() => {
+    const map = {};
+    packagingKits.forEach((k) => (map[k.id] = k));
+    return map;
+  }, [packagingKits]);
   const users = useUserStore((s) => s.users);
   const push = useToastStore((s) => s.push);
 
