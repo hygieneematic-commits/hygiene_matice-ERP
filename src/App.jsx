@@ -9,7 +9,6 @@ import RawMaterials from "./pages/RawMaterials/RawMaterials";
 import Packaging from "./pages/Packaging/Packaging";
 import Production from "./pages/Production/Production";
 import Inventory from "./pages/Inventory/Inventory";
-import CostProfit from "./pages/CostProfit/CostProfit";
 import Reports from "./pages/Reports/Reports";
 import BatchHistory from "./pages/BatchHistory/BatchHistory";
 import UsersPage from "./pages/Users/Users";
@@ -55,7 +54,6 @@ function App() {
           <Route path="/packaging" element={<Guarded path="/packaging"><Packaging /></Guarded>} />
           <Route path="/production" element={<Guarded path="/production"><Production /></Guarded>} />
           <Route path="/inventory" element={<Guarded path="/inventory"><Inventory /></Guarded>} />
-          <Route path="/cost-profit" element={<Guarded path="/cost-profit"><CostProfit /></Guarded>} />
           <Route path="/reports" element={<Guarded path="/reports"><Reports /></Guarded>} />
           <Route path="/batch-history" element={<Guarded path="/batch-history"><BatchHistory /></Guarded>} />
           <Route path="/users" element={<Guarded path="/users"><UsersPage /></Guarded>} />

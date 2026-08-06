@@ -3,7 +3,7 @@ import { useAuthStore } from "../store/useAuthStore";
 // Every route in the app, matched against Sidebar entries in components/layout/Sidebar.jsx
 export const ALL_PAGES = [
   "/", "/products", "/formula-library", "/batch-calculator", "/raw-materials",
-  "/packaging", "/production", "/inventory", "/cost-profit", "/reports",
+  "/packaging", "/production", "/inventory", "/reports",
   "/batch-history", "/users", "/audit-log", "/settings",
 ];
 
@@ -29,7 +29,7 @@ export const ROLE_PERMISSIONS = {
     description: "Inventory only",
   },
   "Sales Manager": {
-    pages: ["/", "/products", "/cost-profit", "/reports"],
+    pages: ["/", "/products", "/reports"],
     canEdit: true,
     description: "Sales only",
   },
@@ -44,7 +44,7 @@ export const ROLE_PERMISSIONS = {
     description: "Quality check only",
   },
   "Viewer": {
-    pages: ["/", "/production", "/batch-history", "/raw-materials", "/cost-profit", "/reports"],
+    pages: ["/", "/production", "/batch-history", "/raw-materials", "/reports"],
     canEdit: false,
     description: "Read only",
   },
