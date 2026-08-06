@@ -41,4 +41,10 @@ export const seedRawMaterials = [
   rm({ id: "rm-tro", name: "TRO", unitType: "volume", basePrice: 105, gstPercent: 5, includeGst: true, stock: 25, minStock: 5, supplier: "Chem Source India" }),
   rm({ id: "rm-op-10", name: "OP-10 / Polysorbate-80", unitType: "volume", basePrice: 300, stock: 15, minStock: 5, supplier: "Chem Source India" }),
   rm({ id: "rm-hydrogen-peroxide", name: "Hydrogen Peroxide", unitType: "volume", basePrice: 35, gstPercent: 18, includeGst: true, stock: 25, minStock: 5, supplier: "Chem Source India" }),
+  // From the "1 Liter Formulation Manual" — materials specific to real product formulas
+  rm({ id: "rm-acid-slurry", name: "Acid Slurry", unitType: "volume", basePrice: 75, gstPercent: 18, includeGst: true, stock: 40, minStock: 10, supplier: "Chem Source India" }),
+  rm({ id: "rm-yellow-colour-solution", name: "Yellow Colour Solution (1%)", unitType: "volume", basePrice: 200, stock: 10, minStock: 3, supplier: "Colorlab Pigments" }),
+  rm({ id: "rm-acid-blue", name: "Acid Blue Dye", unitType: "weight", basePrice: 1800, stock: 2, minStock: 0.5, supplier: "Colorlab Pigments" }),
+  rm({ id: "rm-ocean-blue-colour", name: "Ocean Blue Colour", unitType: "volume", basePrice: 1500, stock: 3, minStock: 1, supplier: "Colorlab Pigments" }),
+  rm({ id: "rm-toilet-fragrance", name: "Toilet Cleaner Fragrance", unitType: "volume", basePrice: 950, stock: 12, minStock: 3, supplier: "Aroma Concepts" }),
 ];

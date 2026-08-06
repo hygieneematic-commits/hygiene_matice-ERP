@@ -10,7 +10,11 @@ import EmptyState from "../../components/ui/EmptyState";
 import Modal from "../../components/ui/Modal";
 import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
+import { useProductionStore } from "../../store/useProductionStore";
+import { useFormulaStore } from "../../store/useFormulaStore";
+import { useProductStore } from "../../store/useProductStore";
 import { useToastStore } from "../../store/useToastStore";
+import { calculateMaterialUsage, estimateRemainingProduction } from "../../utils/costEngine";
 import clsx from "clsx";
 
 export default function Inventory() {
@@ -23,7 +27,19 @@ export default function Inventory() {
   const adjustRawStock = useRawMaterialStore((s) => s.adjustStock);
   const packagingItems = usePackagingStore((s) => s.packagingItems);
   const adjustPkgStock = usePackagingStore((s) => s.adjustStock);
+  const batches = useProductionStore((s) => s.batches);
+  const formulasByProductId = useFormulaStore((s) => s.formulasByProductId);
+  const products = useProductStore((s) => s.products);
   const push = useToastStore((s) => s.push);
+
+  const rawMaterialsById = useMemo(() => {
+    const m = {};
+    rawMaterials.forEach((r) => (m[r.id] = r));
+    return m;
+  }, [rawMaterials]);
+
+  const startOfToday = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+  const startOfMonth = useMemo(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; }, []);
 
   const source = tab === "raw" ? rawMaterials : packagingItems;
   const filtered = useMemo(() => {
@@ -67,6 +83,40 @@ export default function Inventory() {
       align: "right",
       render: (row) => <span className="text-ink-500">{row.minStock} {tab === "raw" ? (row.unitType === "weight" ? "Kg" : "L") : "pcs"}</span>,
     },
+    ...(tab === "raw"
+      ? [
+          {
+            key: "usedToday",
+            header: "Used Today",
+            align: "right",
+            render: (row) => {
+              const u = calculateMaterialUsage({ rawMaterialId: row.id, batches, formulasByProductId, rawMaterialsById, since: startOfToday });
+              return <span className="text-ink-500 text-sm">{u.value > 0 ? `${u.value} ${u.unit}` : "—"}</span>;
+            },
+          },
+          {
+            key: "usedMonth",
+            header: "Used This Month",
+            align: "right",
+            render: (row) => {
+              const u = calculateMaterialUsage({ rawMaterialId: row.id, batches, formulasByProductId, rawMaterialsById, since: startOfMonth });
+              return <span className="text-ink-500 text-sm">{u.value > 0 ? `${u.value} ${u.unit}` : "—"}</span>;
+            },
+          },
+          {
+            key: "remaining",
+            header: "Est. Remaining Production",
+            render: (row) => {
+              const est = estimateRemainingProduction({ rawMaterialId: row.id, rawMaterialsById, formulasByProductId, products });
+              return est ? (
+                <span className="text-xs text-ink-500">Can produce ~<span className="font-mono font-semibold text-ink-900">{est.litersPossible}L</span> {est.productName}</span>
+              ) : (
+                <span className="text-ink-300 text-xs">Not used in any formula</span>
+              );
+            },
+          },
+        ]
+      : []),
     {
       key: "status",
       header: "Status",

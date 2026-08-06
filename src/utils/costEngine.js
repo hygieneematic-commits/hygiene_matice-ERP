@@ -125,27 +125,35 @@ export function calculateFullCost({ product, formula, batchLiters, rawMaterialsB
  * Selling price / GST / profit metrics.
  * sellingPrice is assumed to be PRE-GST (GST is added on top, collected & remitted separately).
  */
-export function calculateSellingMetrics({ sellingPricePerL, costPerLiter, directCostPerLiter, batchLiters, settings }) {
+export function calculateSellingMetrics({ sellingPricePerL, costPerLiter, directCostPerLiter, batchLiters, settings, gstMode = "exclude" }) {
   const cgstPercent = settings.cgstPercent ?? 9;
   const sgstPercent = settings.sgstPercent ?? 9;
+  const totalGstPercent = cgstPercent + sgstPercent;
 
-  const cgstAmount = round((sellingPricePerL * cgstPercent) / 100, 2);
-  const sgstAmount = round((sellingPricePerL * sgstPercent) / 100, 2);
+  // "exclude" — entered price is net of GST, GST is added on top for the invoice.
+  // "include" — entered price already includes GST, so the net (taxable) price is backed out.
+  const netSellingPricePerL =
+    gstMode === "include" ? round(sellingPricePerL / (1 + totalGstPercent / 100), 2) : sellingPricePerL;
+
+  const cgstAmount = round((netSellingPricePerL * cgstPercent) / 100, 2);
+  const sgstAmount = round((netSellingPricePerL * sgstPercent) / 100, 2);
   const totalGstPerL = round(cgstAmount + sgstAmount, 2);
-  const priceWithGst = round(sellingPricePerL + totalGstPerL, 2);
+  const priceWithGst = gstMode === "include" ? round(sellingPricePerL, 2) : round(netSellingPricePerL + totalGstPerL, 2);
 
-  const netProfitPerL = round(sellingPricePerL - costPerLiter, 2);
-  const grossProfitPerL = round(sellingPricePerL - directCostPerLiter, 2);
+  const netProfitPerL = round(netSellingPricePerL - costPerLiter, 2);
+  const grossProfitPerL = round(netSellingPricePerL - directCostPerLiter, 2);
 
-  const marginPercent = sellingPricePerL > 0 ? round((netProfitPerL / sellingPricePerL) * 100, 2) : 0;
+  const marginPercent = netSellingPricePerL > 0 ? round((netProfitPerL / netSellingPricePerL) * 100, 2) : 0;
   const markupPercent = costPerLiter > 0 ? round((netProfitPerL / costPerLiter) * 100, 2) : 0;
 
   return {
+    gstMode,
     cgstPercent,
     sgstPercent,
     cgstAmount,
     sgstAmount,
     totalGstPerL,
+    netSellingPricePerL,
     priceWithGst,
     netProfitPerL,
     grossProfitPerL,
@@ -212,6 +220,52 @@ export function calculatePackLineEconomics({ line, costPerLiterExclPackaging, se
   const marginPercent = sellingPerUnit > 0 ? round((profitPerUnit / sellingPerUnit) * 100, 2) : 0;
   const markupPercent = costPerUnit > 0 ? round((profitPerUnit / costPerUnit) * 100, 2) : 0;
   return { sizeL, costPerUnit, sellingPerUnit, profitPerUnit, marginPercent, markupPercent };
+}
+
+// ---------------------------------------------------------------------------
+// INVENTORY ANALYTICS (spec §6 — Used Today / Used This Month / Estimated
+// Remaining Production). Derived directly from completed batches + formulas,
+// no separate usage log needed.
+// ---------------------------------------------------------------------------
+
+// Sum of a raw material actually consumed (in its display unit) by completed
+// batches whose mfgDate/date falls within [since, now]. Pass since=start of
+// today or start of month.
+export function calculateMaterialUsage({ rawMaterialId, batches, formulasByProductId, rawMaterialsById, since }) {
+  const rm = rawMaterialsById[rawMaterialId];
+  const type = rm ? rm.unitType : "volume";
+  let totalBase = 0;
+  batches
+    .filter((b) => b.status === "completed" && new Date(b.date) >= since)
+    .forEach((b) => {
+      const formula = formulasByProductId[b.productId] || [];
+      const ing = formula.find((i) => i.rawMaterialId === rawMaterialId);
+      if (!ing) return;
+      totalBase += toBaseUnit(ing.quantity, ing.unit) * b.quantityL;
+    });
+  return humanizeQuantity(totalBase, type);
+}
+
+// For a raw material, find the product formula that would run out soonest at
+// current stock, and how many liters of it could still be produced.
+export function estimateRemainingProduction({ rawMaterialId, rawMaterialsById, formulasByProductId, products }) {
+  const rm = rawMaterialsById[rawMaterialId];
+  if (!rm) return null;
+  const stockBase = rm.unitType === "weight" ? rm.stock * 1000 : rm.stock * 1000; // Kg/L -> gm/ml
+  let best = null;
+  products.forEach((product) => {
+    if (!product.active) return;
+    const formula = formulasByProductId[product.id] || [];
+    const ing = formula.find((i) => i.rawMaterialId === rawMaterialId);
+    if (!ing) return;
+    const baseQtyFor1L = toBaseUnit(ing.quantity, ing.unit);
+    if (baseQtyFor1L <= 0) return;
+    const litersPossible = round(stockBase / baseQtyFor1L, 1);
+    if (!best || litersPossible < best.litersPossible) {
+      best = { productName: product.name, litersPossible };
+    }
+  });
+  return best;
 }
 
 // Given a raw material id, find every product whose formula references it (for price-impact preview)

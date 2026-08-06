@@ -44,6 +44,8 @@ export default function BatchCalculator() {
   const [compareOn, setCompareOn] = useState(false);
   const [compareLiters, setCompareLiters] = useState(50);
   const [packagingPlan, setPackagingPlan] = useState([]);
+  const [sellingPriceInput, setSellingPriceInput] = useState("");
+  const [gstMode, setGstMode] = useState("exclude");
 
   // Reset the packaging split whenever the product changes (different products
   // are usually packed differently) — batch size changes keep the same plan.
@@ -53,6 +55,13 @@ export default function BatchCalculator() {
 
   const product = products.find((p) => p.id === productId);
   const formula = getFormula(productId);
+
+  // Selling price defaults to the product's catalog price but is editable per-batch
+  useEffect(() => {
+    setSellingPriceInput(String(product?.sellingPricePerL ?? ""));
+  }, [productId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const effectiveSellingPrice = Number(sellingPriceInput) || 0;
 
   const result = useMemo(() => {
     if (!product) return null;
@@ -67,13 +76,14 @@ export default function BatchCalculator() {
   const metrics = useMemo(() => {
     if (!result || !product) return null;
     return calculateSellingMetrics({
-      sellingPricePerL: product.sellingPricePerL,
+      sellingPricePerL: effectiveSellingPrice,
       costPerLiter: result.costPerLiter,
       directCostPerLiter: result.directCostPerLiter,
       batchLiters,
       settings,
+      gstMode,
     });
-  }, [result, product, batchLiters, settings]);
+  }, [result, product, batchLiters, settings, effectiveSellingPrice, gstMode]);
 
   const planCost = useMemo(() => calculatePackagingPlanCost(packagingPlan, kitsById), [packagingPlan, kitsById]);
 
@@ -85,9 +95,9 @@ export default function BatchCalculator() {
   const packLineEconomics = useMemo(() => {
     return planCost.breakdown.map((line) => ({
       line,
-      econ: calculatePackLineEconomics({ line, costPerLiterExclPackaging, sellingPricePerL: product?.sellingPricePerL || 0 }),
+      econ: calculatePackLineEconomics({ line, costPerLiterExclPackaging, sellingPricePerL: metrics?.netSellingPricePerL || 0 }),
     }));
-  }, [planCost, costPerLiterExclPackaging, product]);
+  }, [planCost, costPerLiterExclPackaging, metrics]);
 
   function handlePreset(val) {
     setBatchLiters(val);
@@ -256,6 +266,31 @@ export default function BatchCalculator() {
           </Card>
 
           <Card>
+            <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-4">Selling Price &amp; GST</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <Label hint="₹ / Liter">Selling Price</Label>
+                <Input type="number" step="0.01" value={sellingPriceInput} onChange={(e) => setSellingPriceInput(e.target.value)} placeholder="e.g. 120" />
+              </div>
+              <div>
+                <Label>GST Mode</Label>
+                <Select value={gstMode} onChange={(e) => setGstMode(e.target.value)}>
+                  <option value="exclude">Exclude GST (price is before tax)</option>
+                  <option value="include">Include GST (price already has tax)</option>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+              <Metric label="Net Selling Price" value={formatCurrency(metrics?.netSellingPricePerL)} />
+              <Metric label="Price with GST" value={formatCurrency(metrics?.priceWithGst)} />
+              <Metric label={`GST (${(metrics?.cgstPercent || 0) + (metrics?.sgstPercent || 0)}%)`} value={formatCurrency(metrics?.totalGstPerL)} />
+              <Metric label="Net Profit / L" value={formatCurrency(metrics?.netProfitPerL)} tone={metrics?.netProfitPerL >= 0 ? "success" : "danger"} />
+              <Metric label="Gross Profit / L" value={formatCurrency(metrics?.grossProfitPerL)} />
+              <Metric label="Margin / Markup" value={`${metrics?.marginPercent || 0}% / ${metrics?.markupPercent || 0}%`} />
+            </div>
+          </Card>
+
+          <Card>
             <p className="text-xs font-semibold text-ink-400 uppercase tracking-wide mb-4">Cost Breakdown</p>
             <div className="space-y-2.5 text-sm">
               <Row label="Raw materials" value={result?.rawMaterialCost.total} />
@@ -279,8 +314,8 @@ export default function BatchCalculator() {
             <p className="text-3xl font-bold font-display mb-4">{formatCurrency(result?.costPerLiter)}</p>
             <div className="grid grid-cols-2 gap-3 text-sm border-t border-white/20 pt-4">
               <div>
-                <p className="text-white/60 text-xs mb-0.5">Selling Price</p>
-                <p className="font-mono font-semibold">{formatCurrency(product?.sellingPricePerL)}</p>
+                <p className="text-white/60 text-xs mb-0.5">Selling Price (net)</p>
+                <p className="font-mono font-semibold">{formatCurrency(metrics?.netSellingPricePerL)}</p>
               </div>
               <div>
                 <p className="text-white/60 text-xs mb-0.5">Net Margin</p>
@@ -311,6 +346,17 @@ function Row({ label, value }) {
     <div className="flex justify-between">
       <span className="text-ink-500">{label}</span>
       <span className="font-mono font-medium text-ink-900">{formatCurrency(value)}</span>
+    </div>
+  );
+}
+
+function Metric({ label, value, tone }) {
+  return (
+    <div className="bg-ink-900/[0.02] border border-surface-border rounded-xl px-3 py-2.5">
+      <p className="text-[11px] text-ink-400 mb-0.5">{label}</p>
+      <p className={clsx("font-mono font-semibold text-sm", tone === "success" ? "text-success-600" : tone === "danger" ? "text-danger-600" : "text-ink-900")}>
+        {value}
+      </p>
     </div>
   );
 }
