@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { Save, Download, Upload, Building2 } from "lucide-react";
+import { useRef, useState, useEffect, useMemo } from "react";
+import { Save, Download, Upload, Building2, AlertCircle } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
@@ -18,6 +18,11 @@ export default function Settings() {
 
   const [form, setForm] = useState(settings);
 
+  // Keep local form in sync if settings change elsewhere (e.g. backup restore)
+  useEffect(() => setForm(settings), [settings]);
+
+  const isDirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(settings), [form, settings]);
+
   function set(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
@@ -34,7 +39,7 @@ export default function Settings() {
       overheadMode: form.overheadMode,
     });
     logAudit("Settings changed", "Company / GST / overhead defaults updated");
-    push("Settings saved");
+    push("Settings saved — synced to every calculation instantly");
   }
 
   function handleBackup() {
@@ -75,7 +80,24 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Company details, tax rates, cost defaults, and data backup" actions={canEdit && <Button onClick={handleSave}><Save size={16} /> Save Changes</Button>} />
+      <PageHeader
+        title="Settings"
+        subtitle="Company details, tax rates, cost defaults, and data backup"
+        actions={
+          canEdit && (
+            <Button onClick={handleSave} disabled={!isDirty}>
+              <Save size={16} /> Save Changes{isDirty ? "" : "d"}
+            </Button>
+          )
+        }
+      />
+
+      {canEdit && isDirty && (
+        <div className="flex items-center gap-2 bg-warning-50 border border-warning-500/20 text-warning-700 text-sm rounded-xl px-4 py-2.5 mb-5">
+          <AlertCircle size={15} className="shrink-0" />
+          You have unsaved changes — click <span className="font-semibold">Save Changes</span> to apply them everywhere.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Card>
@@ -162,6 +184,14 @@ export default function Settings() {
           </Card>
         </div>
       </div>
+
+      {canEdit && isDirty && (
+        <div className="sticky bottom-4 mt-5 flex justify-end lg:hidden">
+          <Button onClick={handleSave} className="shadow-cardHover">
+            <Save size={16} /> Save Changes
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
