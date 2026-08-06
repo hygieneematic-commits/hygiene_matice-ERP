@@ -5,9 +5,8 @@ import { generateId, generateBatchNumber } from "../utils/id";
 import { useFormulaStore } from "./useFormulaStore";
 import { useRawMaterialStore } from "./useRawMaterialStore";
 import { usePackagingStore } from "./usePackagingStore";
-import { usePackagingKitStore } from "./usePackagingKitStore";
 import { useProductStore } from "./useProductStore";
-import { scaleFormula } from "../utils/costEngine";
+import { scaleFormula, calculateComponentPlanCost } from "../utils/costEngine";
 
 export const useProductionStore = create(
   persist(
@@ -57,11 +56,17 @@ export const useProductionStore = create(
         });
 
         if (batch.packagingPlan?.length) {
-          // Custom multi-packaging split defined for this batch — deduct exactly those kits
-          batch.packagingPlan.forEach((line) => {
-            if (line.packagingKitId && Number(line.qty) > 0) {
-              usePackagingKitStore.getState().adjustStock(line.packagingKitId, -Number(line.qty));
-            }
+          // Custom component-based split defined for this batch — deduct exactly
+          // the Bottle / Sticker / Carton / Tape / Cap / Shrink items selected
+          const plan = calculateComponentPlanCost(batch.packagingPlan, packagingById);
+          plan.breakdown.forEach((line) => {
+            const adjust = usePackagingStore.getState().adjustStock;
+            if (line.bottle) adjust(line.bottle.id, -line.units);
+            if (line.sticker) adjust(line.sticker.id, -line.units);
+            if (line.cap) adjust(line.cap.id, -line.units);
+            if (line.shrink) adjust(line.shrink.id, -line.units);
+            if (line.carton) adjust(line.carton.id, -line.cartonCount);
+            if (line.tape) adjust(line.tape.id, -line.tapeCount);
           });
         } else if (product?.packagingBOM?.length && product.packSizeMl) {
           const unitsProduced = Math.floor((batch.quantityL * 1000) / product.packSizeMl);

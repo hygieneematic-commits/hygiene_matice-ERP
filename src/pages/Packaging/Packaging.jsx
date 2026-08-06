@@ -19,7 +19,20 @@ import PackagingKitFormModal from "./PackagingKitFormModal";
 import clsx from "clsx";
 import { usePermissions } from "../../utils/permissions";
 
-const CATEGORIES = ["Bottle", "Cap", "Label", "Shrink", "Carton", "Tape", "Other"];
+// The 6 categories requested — each gets its own table. "Label" is shown as
+// "Stickers / Labels" since that's the same thing for this business.
+const SECTIONS = [
+  { category: "Bottle", title: "Bottles / Containers", hint: "Bottle name, capacity, price, and stock — used to pick the container size in Batch Calculator." },
+  { category: "Label", title: "Stickers / Labels", hint: "Product stickers, per pack size." },
+  { category: "Carton", title: "Cartons / Boxes", hint: "How many bottles each carton holds (capacity) drives auto-calculated carton count." },
+  { category: "Tape", title: "Tape", hint: "Sample prices for now — update anytime." },
+  { category: "Cap", title: "Caps", hint: "Flip-top, screw, or pump caps." },
+  { category: "Shrink", title: "Shrink Film", hint: "Optional — per-bottle sleeves or bulk carton wrap." },
+];
+
+const CATEGORIES = SECTIONS.map((s) => s.category);
+
+const blankForm = { name: "", category: "Bottle", price: "", stock: "", minStock: "", capacityMl: "", capacityUnits: "", active: true };
 
 export default function Packaging() {
   const { packagingItems, addPackaging, updatePackaging, deletePackaging } = usePackagingStore();
@@ -28,7 +41,7 @@ export default function Packaging() {
   const push = useToastStore((s) => s.push);
   const { canEdit } = usePermissions();
 
-  const [tab, setTab] = useState("types");
+  const [tab, setTab] = useState("components");
   const [kitModalOpen, setKitModalOpen] = useState(false);
   const [editingKit, setEditingKit] = useState(null);
   const [deleteKitTarget, setDeleteKitTarget] = useState(null);
@@ -37,7 +50,7 @@ export default function Packaging() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [form, setForm] = useState({ name: "", category: "Bottle", price: "", stock: "", minStock: "" });
+  const [form, setForm] = useState(blankForm);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -45,20 +58,37 @@ export default function Packaging() {
     return packagingItems.filter((p) => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
   }, [packagingItems, query]);
 
-  function openNew() {
+  const byCategory = useMemo(() => {
+    const map = {};
+    CATEGORIES.forEach((c) => (map[c] = []));
+    filtered.forEach((p) => {
+      if (!map[p.category]) map[p.category] = [];
+      map[p.category].push(p);
+    });
+    return map;
+  }, [filtered]);
+
+  function openNew(category) {
     setEditing(null);
-    setForm({ name: "", category: "Bottle", price: "", stock: "", minStock: "" });
+    setForm({ ...blankForm, category: category || "Bottle" });
     setModalOpen(true);
   }
   function openEdit(item) {
     setEditing(item);
-    setForm({ ...item });
+    setForm({ ...blankForm, ...item });
     setModalOpen(true);
   }
 
   function handleSubmit(e) {
     e.preventDefault();
-    const payload = { ...form, price: Number(form.price), stock: Number(form.stock), minStock: Number(form.minStock) };
+    const payload = {
+      ...form,
+      price: Number(form.price),
+      stock: Number(form.stock),
+      minStock: Number(form.minStock),
+      capacityMl: form.capacityMl === "" ? undefined : Number(form.capacityMl),
+      capacityUnits: form.capacityUnits === "" ? undefined : Number(form.capacityUnits),
+    };
     if (editing) {
       updatePackaging(editing.id, payload);
       push("Packaging item updated — costing refreshed everywhere");
@@ -75,46 +105,69 @@ export default function Packaging() {
     setDeleteTarget(null);
   }
 
-  const columns = [
-    {
-      key: "name",
-      header: "Item",
-      render: (row) => {
-        const affected = findAffectedProductsByPackaging(row.id, products);
-        return (
-          <div>
-            <p className="font-medium text-ink-900">{row.name}</p>
-            {affected.length > 0 && <p className="text-[11px] text-brand-500 mt-0.5">Used in {affected.length} product{affected.length !== 1 ? "s" : ""}</p>}
-          </div>
-        );
+  function columnsFor(category) {
+    const cols = [
+      {
+        key: "name",
+        header: "Item",
+        render: (row) => {
+          const affected = findAffectedProductsByPackaging(row.id, products);
+          return (
+            <div>
+              <p className="font-medium text-ink-900">{row.name}</p>
+              {affected.length > 0 && <p className="text-[11px] text-brand-500 mt-0.5">Used in {affected.length} product{affected.length !== 1 ? "s" : ""}</p>}
+            </div>
+          );
+        },
       },
-    },
-    { key: "category", header: "Category", render: (row) => <Badge tone="brand">{row.category}</Badge> },
-    { key: "price", header: "Price / Piece", align: "right", render: (row) => <span className="font-mono font-semibold">{formatCurrency(row.price)}</span> },
-    {
-      key: "stock",
-      header: "Stock",
-      align: "right",
-      render: (row) => (
-        <div className="flex items-center justify-end gap-1.5">
-          {row.stock <= row.minStock && <AlertTriangle size={13} className="text-warning-500" />}
-          <span className={row.stock <= row.minStock ? "text-warning-600 font-semibold" : "text-ink-700"}>{row.stock} pcs</span>
-        </div>
-      ),
-    },
-    {
-      key: "actions",
-      header: "",
-      align: "right",
-      render: (row) =>
-        canEdit && (
-          <div className="flex items-center justify-end gap-1">
-            <button onClick={() => openEdit(row)} className="p-2 text-ink-400 hover:text-ink-700 hover:bg-ink-900/5 rounded-lg transition-colors"><Pencil size={15} /></button>
-            <button onClick={() => setDeleteTarget(row)} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors"><Trash2 size={15} /></button>
+    ];
+    if (category === "Bottle") {
+      cols.push({
+        key: "capacityMl",
+        header: "Capacity",
+        render: (row) => <span className="text-ink-500 text-sm">{row.capacityMl ? (row.capacityMl >= 1000 ? `${row.capacityMl / 1000} L` : `${row.capacityMl} ml`) : "—"}</span>,
+      });
+    }
+    if (category === "Carton") {
+      cols.push({
+        key: "capacityUnits",
+        header: "Holds",
+        render: (row) => <span className="text-ink-500 text-sm">{row.capacityUnits ? `${row.capacityUnits} bottle${row.capacityUnits !== 1 ? "s" : ""}` : "—"}</span>,
+      });
+    }
+    cols.push(
+      { key: "price", header: "Price / Piece", align: "right", render: (row) => <span className="font-mono font-semibold">{formatCurrency(row.price)}</span> },
+      {
+        key: "stock",
+        header: "Stock",
+        align: "right",
+        render: (row) => (
+          <div className="flex items-center justify-end gap-1.5">
+            {row.stock <= row.minStock && <AlertTriangle size={13} className="text-warning-500" />}
+            <span className={row.stock <= row.minStock ? "text-warning-600 font-semibold" : "text-ink-700"}>{row.stock} pcs</span>
           </div>
         ),
-    },
-  ];
+      },
+      {
+        key: "status",
+        header: "Status",
+        render: (row) => (row.active === false ? <Badge tone="neutral">Inactive</Badge> : <Badge tone="success">Active</Badge>),
+      },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        render: (row) =>
+          canEdit && (
+            <div className="flex items-center justify-end gap-1">
+              <button onClick={() => openEdit(row)} className="p-2 text-ink-400 hover:text-ink-700 hover:bg-ink-900/5 rounded-lg transition-colors"><Pencil size={15} /></button>
+              <button onClick={() => setDeleteTarget(row)} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors"><Trash2 size={15} /></button>
+            </div>
+          ),
+      }
+    );
+    return cols;
+  }
 
   const kitColumns = [
     {
@@ -171,20 +224,18 @@ export default function Packaging() {
     <div>
       <PageHeader
         title="Packaging"
-        subtitle="Packaging types and components — editable, feeds every batch cost"
+        subtitle="Bottles, stickers, cartons, tape, caps & shrink — each editable, feeds every batch cost"
         actions={
           !canEdit ? null : tab === "types" ? (
             <Button onClick={() => { setEditingKit(null); setKitModalOpen(true); }}><Plus size={16} /> Add Packaging Type</Button>
-          ) : (
-            <Button onClick={openNew}><Plus size={16} /> Add Component</Button>
-          )
+          ) : null
         }
       />
 
-      <div className="flex gap-2 mb-5">
+      <div className="flex gap-2 mb-5 flex-wrap">
         {[
-          { key: "types", label: "Packaging Types" },
-          { key: "components", label: "Components" },
+          { key: "components", label: "Bottles, Stickers, Cartons…" },
+          { key: "types", label: "Packaging Types (bundled presets)" },
         ].map((t) => (
           <button
             key={t.key}
@@ -202,18 +253,40 @@ export default function Packaging() {
       {tab === "types" ? (
         <Card padding="p-5">
           <p className="text-xs text-ink-400 mb-4">
-            Complete pack sizes (e.g. "1 Liter Bottle", "5 Liter HDPE Can") used when splitting a batch across packaging in the Batch Calculator and Production. Every cost component is editable.
+            Optional bundled presets (kept for quick reference). The Batch Calculator and Production now build packaging from the individual Bottle / Sticker / Carton / Tape / Cap / Shrink items below instead.
           </p>
           <DataTable columns={kitColumns} data={packagingKits} emptyState={<EmptyState icon={PackageOpen} title="No packaging types yet" />} />
         </Card>
       ) : (
-        <Card padding="p-5">
-          <div className="relative max-w-sm mb-4">
+        <div className="space-y-5">
+          <div className="relative max-w-sm">
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400" />
-            <Input placeholder="Search packaging…" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-10" />
+            <Input placeholder="Search across all categories…" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-10" />
           </div>
-          <DataTable columns={columns} data={filtered} emptyState={<EmptyState icon={PackageOpen} title="No packaging items found" />} />
-        </Card>
+
+          {SECTIONS.map((section) => (
+            <Card key={section.category} padding="p-5">
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <div>
+                  <p className="text-sm font-semibold text-ink-900">{section.title}</p>
+                  <p className="text-xs text-ink-400 mt-0.5">{section.hint}</p>
+                </div>
+                {canEdit && (
+                  <Button size="sm" variant="secondary" onClick={() => openNew(section.category)}>
+                    <Plus size={14} /> Add {section.title.split(" /")[0].replace(/s$/, "")}
+                  </Button>
+                )}
+              </div>
+              <div className="mt-3">
+                <DataTable
+                  columns={columnsFor(section.category)}
+                  data={byCategory[section.category] || []}
+                  emptyState={<EmptyState icon={PackageOpen} title={`No ${section.title.toLowerCase()} yet`} />}
+                />
+              </div>
+            </Card>
+          ))}
+        </div>
       )}
 
       <PackagingKitFormModal open={kitModalOpen} onClose={() => { setKitModalOpen(false); setEditingKit(null); }} kit={editingKit} onSaved={() => { push(editingKit ? "Packaging type updated" : "Packaging type added"); setKitModalOpen(false); setEditingKit(null); }} />
@@ -222,7 +295,7 @@ export default function Packaging() {
         onClose={() => setDeleteKitTarget(null)}
         onConfirm={() => { deleteKit(deleteKitTarget.id); push("Packaging type deleted", "info"); setDeleteKitTarget(null); }}
         title={`Delete "${deleteKitTarget?.name}"?`}
-        description="This packaging type will no longer be selectable in the Batch Calculator or Production."
+        description="This packaging type will no longer be selectable as a bundled preset."
       />
 
       <Modal
@@ -240,7 +313,7 @@ export default function Packaging() {
             <div>
               <Label>Category</Label>
               <Select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {CATEGORIES.map((c) => <option key={c} value={c}>{SECTIONS.find((s) => s.category === c)?.title || c}</option>)}
               </Select>
             </div>
             <div>
@@ -248,6 +321,18 @@ export default function Packaging() {
               <Input type="number" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
             </div>
           </FormRow>
+          {form.category === "Bottle" && (
+            <div>
+              <Label hint="ml — used to auto-calculate bottle count for a batch">Capacity</Label>
+              <Input type="number" value={form.capacityMl} onChange={(e) => setForm({ ...form, capacityMl: e.target.value })} placeholder="e.g. 1000 for 1 Liter" />
+            </div>
+          )}
+          {form.category === "Carton" && (
+            <div>
+              <Label hint="How many bottles this carton holds — used to auto-calculate carton count">Holds (bottles)</Label>
+              <Input type="number" value={form.capacityUnits} onChange={(e) => setForm({ ...form, capacityUnits: e.target.value })} placeholder="e.g. 12" />
+            </div>
+          )}
           <FormRow cols={2}>
             <div>
               <Label>Stock (pcs)</Label>
@@ -258,10 +343,14 @@ export default function Packaging() {
               <Input type="number" value={form.minStock} onChange={(e) => setForm({ ...form, minStock: e.target.value })} required />
             </div>
           </FormRow>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="pkg-active" checked={form.active !== false} onChange={(e) => setForm({ ...form, active: e.target.checked })} className="w-4 h-4 rounded accent-brand-500" />
+            <label htmlFor="pkg-active" className="text-sm text-ink-700">Active (selectable in Batch Calculator)</label>
+          </div>
         </form>
       </Modal>
 
-      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title={`Delete "${deleteTarget?.name}"?`} description="Products referencing this item will need a new packaging assignment." />
+      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} title={`Delete "${deleteTarget?.name}"?`} description="Products or packaging plans referencing this item will need a new assignment." />
     </div>
   );
 }

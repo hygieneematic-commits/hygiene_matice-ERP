@@ -2,26 +2,37 @@ import { useState, useMemo } from "react";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { Label, Input, Select, Textarea, FormRow } from "../../components/ui/Field";
-import PackagingPlanBuilder from "../../components/production/PackagingPlanBuilder";
+import PackagingComponentBuilder from "../../components/production/PackagingComponentBuilder";
 import { useProductStore } from "../../store/useProductStore";
 import { useProductionStore } from "../../store/useProductionStore";
-import { usePackagingKitStore } from "../../store/usePackagingKitStore";
+import { usePackagingStore } from "../../store/usePackagingStore";
 import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
 import { useAuditStore } from "../../store/useAuditStore";
-import { calculatePackagingPlanCost } from "../../utils/costEngine";
+import { calculateComponentPlanCost } from "../../utils/costEngine";
 
 const SHIFTS = ["Morning", "Afternoon", "Night"];
+const PACKAGING_CATEGORIES = ["Bottle", "Label", "Carton", "Tape", "Cap", "Shrink"];
 
 export default function NewBatchModal({ open, onClose, onCreated }) {
   const products = useProductStore((s) => s.products);
   const users = useUserStore((s) => s.users);
-  const packagingKits = usePackagingKitStore((s) => s.packagingKits);
-  const kitsById = useMemo(() => {
+  const packagingItemsAll = usePackagingStore((s) => s.packagingItems);
+  const packagingById = useMemo(() => {
     const map = {};
-    packagingKits.forEach((k) => (map[k.id] = k));
+    packagingItemsAll.forEach((p) => (map[p.id] = p));
     return map;
-  }, [packagingKits]);
+  }, [packagingItemsAll]);
+  const packagingByCategory = useMemo(() => {
+    const map = {};
+    PACKAGING_CATEGORIES.forEach((c) => (map[c] = []));
+    packagingItemsAll.forEach((p) => {
+      if (p.active === false) return;
+      if (!map[p.category]) map[p.category] = [];
+      map[p.category].push(p);
+    });
+    return map;
+  }, [packagingItemsAll]);
   const { createBatch } = useProductionStore();
   const push = useToastStore((s) => s.push);
   const logAudit = useAuditStore((s) => s.log);
@@ -42,7 +53,7 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
-  const planCost = calculatePackagingPlanCost(packagingPlan, kitsById);
+  const planCost = calculateComponentPlanCost(packagingPlan, packagingById);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -108,11 +119,11 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
         </FormRow>
 
         <div className="border border-surface-border rounded-xl p-4">
-          <Label hint="Optional — split across sizes now, or later before confirming">Packaging Distribution</Label>
-          <PackagingPlanBuilder
-            planLines={packagingPlan}
+          <Label hint="Optional — pick Bottle, then only the components this batch actually uses">Packaging Distribution</Label>
+          <PackagingComponentBuilder
+            lines={packagingPlan}
             onChange={setPackagingPlan}
-            kits={packagingKits}
+            packagingByCategory={packagingByCategory}
             batchLiters={form.quantityL}
             planCost={planCost}
           />

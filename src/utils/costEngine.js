@@ -209,6 +209,82 @@ export function calculatePackagingPlanCost(planLines, kitsById) {
   return { breakdown, totalCost: round(totalCost, 2), totalMl: round(totalMl, 0) };
 }
 
+// ---------------------------------------------------------------------------
+// COMPONENT-BASED PACKAGING (spec: Batch Calculator asks Bottle → Sticker →
+// Carton → Tape → Cap → Shrink individually, each optional, nothing hardcoded
+// — everything comes from the Packaging Master categories).
+// line shape: { id, bottleId, units, useSticker, stickerId, useCarton,
+//   cartonId, useTape, tapeId, useCap, capId, useShrink, shrinkId }
+// ---------------------------------------------------------------------------
+export function calculateComponentPlanCost(lines, packagingById) {
+  let totalCost = 0;
+  let totalMl = 0;
+  const breakdown = (lines || [])
+    .filter((l) => l.bottleId && Number(l.units) > 0)
+    .map((line) => {
+      const bottle = packagingById[line.bottleId];
+      if (!bottle) return null;
+      const units = Number(line.units);
+      const sticker = line.useSticker ? packagingById[line.stickerId] : null;
+      const carton = line.useCarton ? packagingById[line.cartonId] : null;
+      const tape = line.useTape ? packagingById[line.tapeId] : null;
+      const cap = line.useCap ? packagingById[line.capId] : null;
+      const shrink = line.useShrink ? packagingById[line.shrinkId] : null;
+
+      const cartonCount = carton ? Math.ceil(units / (carton.capacityUnits || 1)) : 0;
+      const tapeCount = tape ? (carton ? cartonCount : 1) : 0;
+
+      const bottleCost = round(bottle.price * units, 2);
+      const stickerCost = round((sticker?.price || 0) * units, 2);
+      const capCost = round((cap?.price || 0) * units, 2);
+      const shrinkCost = round((shrink?.price || 0) * units, 2);
+      const cartonCost = round((carton?.price || 0) * cartonCount, 2);
+      const tapeCost = round((tape?.price || 0) * tapeCount, 2);
+
+      const lineCost = round(bottleCost + stickerCost + capCost + shrinkCost + cartonCost + tapeCost, 2);
+      const lineMl = (bottle.capacityMl || 0) * units;
+      totalCost += lineCost;
+      totalMl += lineMl;
+
+      return {
+        ...line,
+        units,
+        bottle,
+        sticker,
+        carton,
+        tape,
+        cap,
+        shrink,
+        cartonCount,
+        tapeCount,
+        bottleCost,
+        stickerCost,
+        capCost,
+        shrinkCost,
+        cartonCost,
+        tapeCost,
+        lineCost,
+        lineMl,
+        unitCost: units > 0 ? round(lineCost / units, 2) : 0,
+      };
+    })
+    .filter(Boolean);
+  return { breakdown, totalCost: round(totalCost, 2), totalMl: round(totalMl, 0) };
+}
+
+// Per-line economics: cost, selling price, profit, margin & markup for one
+// packed unit, given the batch's per-liter production cost (raw material +
+// overhead, i.e. BEFORE packaging) and selling price/L.
+export function calculateComponentLineEconomics({ line, costPerLiterExclPackaging, sellingPricePerL }) {
+  const sizeL = (line.bottle?.capacityMl || 0) / 1000;
+  const costPerUnit = round(costPerLiterExclPackaging * sizeL + line.unitCost, 2);
+  const sellingPerUnit = round((sellingPricePerL || 0) * sizeL, 2);
+  const profitPerUnit = round(sellingPerUnit - costPerUnit, 2);
+  const marginPercent = sellingPerUnit > 0 ? round((profitPerUnit / sellingPerUnit) * 100, 2) : 0;
+  const markupPercent = costPerUnit > 0 ? round((profitPerUnit / costPerUnit) * 100, 2) : 0;
+  return { sizeL, costPerUnit, sellingPerUnit, profitPerUnit, marginPercent, markupPercent };
+}
+
 // Per-packaging-type economics: cost, selling price, profit, margin & markup
 // for one unit of a given pack size, given the batch's per-liter production
 // cost (raw material + overhead, i.e. BEFORE packaging) and selling price/L.

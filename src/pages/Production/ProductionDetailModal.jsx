@@ -7,10 +7,11 @@ import Badge from "../../components/ui/Badge";
 import { Input, Label, Select } from "../../components/ui/Field";
 import { useProductStore } from "../../store/useProductStore";
 import { useProductionStore } from "../../store/useProductionStore";
-import { usePackagingKitStore } from "../../store/usePackagingKitStore";
+import { usePackagingStore } from "../../store/usePackagingStore";
 import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
 import { formatDate, formatCurrency } from "../../utils/formatters";
+import { calculateComponentPlanCost } from "../../utils/costEngine";
 
 // Manufacturing Process — sequential steps, each must be completed in order (spec §4)
 const PROCESS_STEPS = [
@@ -38,12 +39,13 @@ const QC_ITEMS = [
 export default function ProductionDetailModal({ open, onClose, batch }) {
   const product = useProductStore((s) => (batch ? s.getById(batch.productId) : null));
   const { confirmProduction, updateBatch } = useProductionStore();
-  const packagingKits = usePackagingKitStore((s) => s.packagingKits);
-  const kitsById = useMemo(() => {
+  const packagingItemsAll = usePackagingStore((s) => s.packagingItems);
+  const packagingById = useMemo(() => {
     const map = {};
-    packagingKits.forEach((k) => (map[k.id] = k));
+    packagingItemsAll.forEach((p) => (map[p.id] = p));
     return map;
-  }, [packagingKits]);
+  }, [packagingItemsAll]);
+  const planCost = useMemo(() => calculateComponentPlanCost(batch?.packagingPlan, packagingById), [batch, packagingById]);
   const users = useUserStore((s) => s.users);
   const push = useToastStore((s) => s.push);
 
@@ -245,21 +247,25 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
             )}
           </div>
 
-          {batch.packagingPlan?.length > 0 && (
+          {planCost.breakdown.length > 0 && (
             <div>
               <p className="text-sm font-semibold text-ink-900 mb-2">Packaging Distribution</p>
               <div className="divide-y divide-surface-border border border-surface-border rounded-xl overflow-hidden">
-                {batch.packagingPlan.map((line, i) => {
-                  const kit = kitsById[line.packagingKitId];
-                  return (
-                    <div key={i} className="flex items-center justify-between px-3.5 py-2.5 text-sm">
-                      <span className="text-ink-700">{kit?.name || "Unknown packaging"}</span>
-                      <span className="font-mono font-semibold text-ink-900">
-                        {line.qty} × {formatCurrency(kit?.price)}
-                      </span>
+                {planCost.breakdown.map((line) => (
+                  <div key={line.id} className="px-3.5 py-2.5 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-700">{line.bottle?.name || "Unknown bottle"}</span>
+                      <span className="font-mono font-semibold text-ink-900">{line.units} × {formatCurrency(line.lineCost / line.units)} = {formatCurrency(line.lineCost)}</span>
                     </div>
-                  );
-                })}
+                    <p className="text-[11px] text-ink-400 mt-0.5">
+                      {[line.sticker && "Sticker", line.cap && "Cap", line.shrink && "Shrink", line.carton && `Carton (${line.cartonCount})`, line.tape && "Tape"].filter(Boolean).join(" · ") || "Bottle only"}
+                    </p>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between px-3.5 py-2.5 text-sm bg-ink-900/[0.02] font-semibold">
+                  <span className="text-ink-900">Total Packaging Cost</span>
+                  <span className="font-mono text-ink-900">{formatCurrency(planCost.totalCost)}</span>
+                </div>
               </div>
             </div>
           )}

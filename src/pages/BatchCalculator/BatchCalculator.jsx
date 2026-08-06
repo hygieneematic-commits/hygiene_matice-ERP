@@ -5,23 +5,23 @@ import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
 import { Select, Input, Label } from "../../components/ui/Field";
 import LiquidVisualizer from "../../components/charts/LiquidVisualizer";
-import PackagingPlanBuilder from "../../components/production/PackagingPlanBuilder";
+import PackagingComponentBuilder from "../../components/production/PackagingComponentBuilder";
 import { useProductStore } from "../../store/useProductStore";
 import { useFormulaStore } from "../../store/useFormulaStore";
 import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
-import { usePackagingKitStore } from "../../store/usePackagingKitStore";
 import { useSettingsStore } from "../../store/useSettingsStore";
 import {
   calculateFullCost,
   calculateSellingMetrics,
-  calculatePackagingPlanCost,
-  calculatePackLineEconomics,
+  calculateComponentPlanCost,
+  calculateComponentLineEconomics,
 } from "../../utils/costEngine";
 import { formatCurrency } from "../../utils/formatters";
 import clsx from "clsx";
 
 const PRESETS = [5, 10, 20, 50, 100, 200, 500, 1000];
+const PACKAGING_CATEGORIES = ["Bottle", "Label", "Carton", "Tape", "Cap", "Shrink"];
 
 export default function BatchCalculator() {
   const products = useProductStore((s) => s.products);
@@ -30,13 +30,17 @@ export default function BatchCalculator() {
   const rawMaterialsById = useMemo(() => { const m = {}; rawMaterials.forEach((r) => (m[r.id] = r)); return m; }, [rawMaterials]);
   const packagingItemsAll = usePackagingStore((s) => s.packagingItems);
   const packagingById = useMemo(() => { const m = {}; packagingItemsAll.forEach((p) => (m[p.id] = p)); return m; }, [packagingItemsAll]);
-  const settings = useSettingsStore((s) => s.settings);
-  const packagingKits = usePackagingKitStore((s) => s.packagingKits);
-  const kitsById = useMemo(() => {
+  const packagingByCategory = useMemo(() => {
     const map = {};
-    packagingKits.forEach((k) => (map[k.id] = k));
+    PACKAGING_CATEGORIES.forEach((c) => (map[c] = []));
+    packagingItemsAll.forEach((p) => {
+      if (p.active === false) return;
+      if (!map[p.category]) map[p.category] = [];
+      map[p.category].push(p);
+    });
     return map;
-  }, [packagingKits]);
+  }, [packagingItemsAll]);
+  const settings = useSettingsStore((s) => s.settings);
 
   const [productId, setProductId] = useState(products[0]?.id || "");
   const [batchLiters, setBatchLiters] = useState(10);
@@ -85,7 +89,7 @@ export default function BatchCalculator() {
     });
   }, [result, product, batchLiters, settings, effectiveSellingPrice, gstMode]);
 
-  const planCost = useMemo(() => calculatePackagingPlanCost(packagingPlan, kitsById), [packagingPlan, kitsById]);
+  const planCost = useMemo(() => calculateComponentPlanCost(packagingPlan, packagingById), [packagingPlan, packagingById]);
 
   const costPerLiterExclPackaging = useMemo(() => {
     if (!result || !batchLiters) return 0;
@@ -95,7 +99,7 @@ export default function BatchCalculator() {
   const packLineEconomics = useMemo(() => {
     return planCost.breakdown.map((line) => ({
       line,
-      econ: calculatePackLineEconomics({ line, costPerLiterExclPackaging, sellingPricePerL: metrics?.netSellingPricePerL || 0 }),
+      econ: calculateComponentLineEconomics({ line, costPerLiterExclPackaging, sellingPricePerL: metrics?.netSellingPricePerL || 0 }),
     }));
   }, [planCost, costPerLiterExclPackaging, metrics]);
 
@@ -208,15 +212,15 @@ export default function BatchCalculator() {
                 <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
                   <PackageOpen size={15} className="text-brand-600" /> Packaging Plan
                 </p>
-                <p className="text-xs text-ink-400 mt-0.5">Split this batch across one or more packaging sizes</p>
+                <p className="text-xs text-ink-400 mt-0.5">Bottle → Sticker → Carton → Tape → Cap → Shrink — pick only what this batch actually uses</p>
               </div>
-              <Badge tone="brand">{packagingKits.length} types available</Badge>
+              <Badge tone="brand">{packagingByCategory.Bottle.length} bottle types</Badge>
             </div>
             <div className="p-5">
-              <PackagingPlanBuilder
-                planLines={packagingPlan}
+              <PackagingComponentBuilder
+                lines={packagingPlan}
                 onChange={setPackagingPlan}
-                kits={packagingKits}
+                packagingByCategory={packagingByCategory}
                 batchLiters={batchLiters}
                 planCost={planCost}
               />
@@ -237,8 +241,8 @@ export default function BatchCalculator() {
                     <tbody>
                       {packLineEconomics.map(({ line, econ }) => (
                         <tr key={line.id} className="border-b border-surface-border last:border-0">
-                          <td className="px-3 py-3 text-sm text-ink-700">{line.kit.name}</td>
-                          <td className="px-3 py-3 text-sm text-right font-mono">{line.qty}</td>
+                          <td className="px-3 py-3 text-sm text-ink-700">{line.bottle.name}</td>
+                          <td className="px-3 py-3 text-sm text-right font-mono">{line.units}</td>
                           <td className="px-3 py-3 text-sm text-right font-mono font-semibold text-ink-900">{formatCurrency(econ.costPerUnit)}</td>
                           <td className="px-3 py-3 text-sm text-right font-mono">{formatCurrency(econ.sellingPerUnit)}</td>
                           <td className={clsx("px-3 py-3 text-sm text-right font-mono font-semibold", econ.profitPerUnit >= 0 ? "text-success-600" : "text-danger-600")}>
