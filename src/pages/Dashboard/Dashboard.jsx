@@ -18,6 +18,7 @@ import { useFormulaStore } from "../../store/useFormulaStore";
 import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
 import { useSettingsStore } from "../../store/useSettingsStore";
+import { useAuthStore } from "../../store/useAuthStore";
 import { calculateFullCost, calculateSellingMetrics, calculateComponentPlanCost } from "../../utils/costEngine";
 import { formatCurrency, timeAgo } from "../../utils/formatters";
 
@@ -64,6 +65,10 @@ export default function Dashboard() {
   }
 
   const today = new Date();
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const firstName = currentUser?.name?.split(" ")[0] || "there";
+  const hour = today.getHours();
+  const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const yesterday = subDays(today, 1);
 
   const todayBatches = completed.filter((b) => isSameDay(new Date(b.date), today));
@@ -126,7 +131,7 @@ export default function Dashboard() {
   return (
     <div>
       <PageHeader
-        title={`Good day, Aarav 👋`}
+        title={`${timeGreeting}, ${firstName} 👋`}
         subtitle={format(today, "EEEE, d MMMM yyyy")}
       />
 

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Trash2, Save, History, RotateCcw, FlaskConical } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Save, History, RotateCcw, FlaskConical, ChevronUp, ChevronDown } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
@@ -23,7 +23,7 @@ export default function FormulaDetail() {
   const push = useToastStore((s) => s.push);
 
   const product = useProductStore((s) => s.getById(productId));
-  const { getFormula, addIngredient, updateIngredient, deleteIngredient, saveVersion, revertToVersion } = useFormulaStore();
+  const { getFormula, addIngredient, updateIngredient, deleteIngredient, saveVersion, revertToVersion, addMethodStep, updateMethodStep, deleteMethodStep, moveMethodStep } = useFormulaStore();
   const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
   const rawMaterialsById = useMemo(() => { const m = {}; rawMaterials.forEach((r) => (m[r.id] = r)); return m; }, [rawMaterials]);
 
@@ -127,6 +127,58 @@ export default function FormulaDetail() {
                 ))}
               </div>
             )}
+          </Card>
+
+          <Card className="mt-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-semibold text-ink-900">Manufacturing Method</p>
+              <Button variant="secondary" size="sm" onClick={() => addMethodStep(productId)}>
+                <Plus size={14} /> Add Step
+              </Button>
+            </div>
+            {(formula.method || []).length === 0 ? (
+              <p className="text-sm text-ink-400 py-4 text-center">No steps yet — add the manufacturing process for this product.</p>
+            ) : (
+              <div className="space-y-2">
+                {(formula.method || []).map((step, idx) => (
+                  <div key={step.id} className="flex items-center gap-2 border border-surface-border rounded-xl px-3 py-2">
+                    <span className="w-6 h-6 rounded-full bg-ink-900/[0.04] text-ink-500 text-xs font-semibold flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <Input
+                      value={step.text}
+                      onChange={(e) => updateMethodStep(productId, step.id, e.target.value)}
+                      className="flex-1 !py-1.5 !text-sm"
+                    />
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => moveMethodStep(productId, step.id, "up")}
+                        disabled={idx === 0}
+                        className="p-1.5 text-ink-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        onClick={() => moveMethodStep(productId, step.id, "down")}
+                        disabled={idx === (formula.method || []).length - 1}
+                        className="p-1.5 text-ink-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                      <button
+                        onClick={() => deleteMethodStep(productId, step.id)}
+                        className="p-1.5 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-ink-400 mt-3">
+              This exact step list is what the operator works through in Production for this product.
+            </p>
           </Card>
         </div>
 
@@ -237,35 +289,33 @@ export default function FormulaDetail() {
 function IngredientRow({ ingredient, onUpdate, onDelete, rawMaterialsById }) {
   const rm = rawMaterialsById[ingredient.rawMaterialId];
   return (
-    <div className="flex items-center gap-4 px-5 py-4 hover:bg-ink-900/[0.015] transition-colors">
-      <div className="flex-1 min-w-0">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 hover:bg-ink-900/[0.015] transition-colors">
+      <div className="w-full sm:flex-1 sm:min-w-0">
         <p className="text-sm font-medium text-ink-900 truncate">{ingredient.rawMaterialName}</p>
-        <p className="text-xs text-ink-400">{formatCurrency(rm?.price || 0)} / {rm?.unitType === "weight" ? "Kg" : "L"}</p>
+        <p className="text-xs text-ink-400 whitespace-nowrap">{formatCurrency(rm?.price || 0)} / {rm?.unitType === "weight" ? "Kg" : "L"}</p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
         <Input
           type="number"
           step="0.01"
           value={ingredient.quantity}
           onChange={(e) => onUpdate({ quantity: Number(e.target.value) })}
-          className="w-24 text-center"
+          className="w-20 sm:w-24 text-center shrink-0"
         />
         <Select
           value={ingredient.unit}
           onChange={(e) => onUpdate({ unit: e.target.value })}
-          className="w-20"
+          className="w-16 sm:w-20 shrink-0"
         >
           {ALL_UNITS.filter((u) => !rm || unitType(u) === rm.unitType).map((u) => (
             <option key={u} value={u}>{u}</option>
           ))}
         </Select>
+        <p className="text-sm font-mono font-semibold text-ink-900 w-16 sm:w-24 text-right shrink-0">{formatCurrency(ingredient.cost)}</p>
+        <button onClick={onDelete} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors shrink-0">
+          <Trash2 size={15} />
+        </button>
       </div>
-      <div className="w-24 text-right">
-        <p className="text-sm font-mono font-semibold text-ink-900">{formatCurrency(ingredient.cost)}</p>
-      </div>
-      <button onClick={onDelete} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors shrink-0">
-        <Trash2 size={15} />
-      </button>
     </div>
   );
 }

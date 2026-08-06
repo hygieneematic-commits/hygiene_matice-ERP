@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { FlaskConical } from "lucide-react";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
 import { Label, Input, Select, Textarea, FormRow } from "../../components/ui/Field";
@@ -6,10 +7,14 @@ import PackagingComponentBuilder from "../../components/production/PackagingComp
 import { useProductStore } from "../../store/useProductStore";
 import { useProductionStore } from "../../store/useProductionStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
+import { useFormulaStore } from "../../store/useFormulaStore";
+import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
 import { useAuditStore } from "../../store/useAuditStore";
 import { calculateComponentPlanCost } from "../../utils/costEngine";
+import { computeFormulaLines, computeRawMaterialCost, safeNumber } from "../../utils/batchCalcEngine";
+import { formatCurrency, formatNumber } from "../../utils/formatters";
 
 const SHIFTS = ["Morning", "Afternoon", "Night"];
 const PACKAGING_CATEGORIES = ["Bottle", "Label", "Carton", "Tape", "Cap", "Shrink"];
@@ -34,6 +39,13 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
     return map;
   }, [packagingItemsAll]);
   const { createBatch } = useProductionStore();
+  const { getFormula } = useFormulaStore();
+  const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
+  const rawMaterialsById = useMemo(() => {
+    const m = {};
+    rawMaterials.forEach((r) => (m[r.id] = r));
+    return m;
+  }, [rawMaterials]);
   const push = useToastStore((s) => s.push);
   const logAudit = useAuditStore((s) => s.log);
 
@@ -54,6 +66,16 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
   }
 
   const planCost = calculateComponentPlanCost(packagingPlan, packagingById);
+
+  // Scaled raw-material requirement for the selected product + batch size —
+  // shop floor reference so the operator knows exactly how much of each
+  // ingredient this specific batch needs, no separate lookup required.
+  const formula = getFormula(form.productId);
+  const formulaLines = useMemo(
+    () => computeFormulaLines(formula?.ingredients, form.quantityL, rawMaterialsById),
+    [formula, form.quantityL, rawMaterialsById]
+  );
+  const rawMaterialResult = useMemo(() => computeRawMaterialCost(formulaLines), [formulaLines]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -87,6 +109,38 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
             <Input type="number" step="0.1" value={form.quantityL} onChange={(e) => set("quantityL", e.target.value)} required />
           </div>
         </FormRow>
+
+        {rawMaterialResult.lines.length > 0 && (
+          <div className="border border-surface-border rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-ink-900/[0.02] flex items-center gap-2">
+              <FlaskConical size={14} className="text-brand-600" />
+              <p className="text-xs font-semibold text-ink-900">
+                Formula Requirement — {safeNumber(form.quantityL)} L batch
+              </p>
+            </div>
+            <div className="divide-y divide-surface-border max-h-52 overflow-y-auto">
+              {rawMaterialResult.lines.map((line, i) => {
+                const isKg = line.type === "weight";
+                const showLarge = line.requiredBaseQty >= 1000;
+                const qty = showLarge ? line.requiredBaseQty / 1000 : line.requiredBaseQty;
+                const unit = showLarge ? (isKg ? "Kg" : "L") : isKg ? "gm" : "ml";
+                return (
+                  <div key={i} className="flex items-center justify-between px-4 py-2 text-sm">
+                    <span className="text-ink-700">{line.rawMaterialName}</span>
+                    <span className="font-mono font-medium text-ink-900">
+                      {formatNumber(qty, 2)} {unit}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-4 py-2 bg-brand-50/50 flex justify-between text-sm">
+              <span className="font-semibold text-ink-900">Total Raw Material Cost</span>
+              <span className="font-mono font-bold text-brand-700">{formatCurrency(rawMaterialResult.totalCost)}</span>
+            </div>
+          </div>
+        )}
+
         <FormRow cols={3}>
           <div>
             <Label>Operator</Label>

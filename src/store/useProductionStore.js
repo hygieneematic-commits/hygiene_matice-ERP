@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { firestoreSync } from "./middleware/firestoreSync";
-import { seedBatchHistory } from "../data/seedMisc";
 import { generateId, generateBatchNumber } from "../utils/id";
 import { useFormulaStore } from "./useFormulaStore";
 import { useRawMaterialStore } from "./useRawMaterialStore";
@@ -11,7 +10,10 @@ import { scaleFormula, calculateComponentPlanCost } from "../utils/costEngine";
 export const useProductionStore = create(
   firestoreSync(
     (set, get) => ({
-      batches: seedBatchHistory,
+      // Real production data only — no seeded/demo batches. New environments
+      // (or anyone who resets Firestore) start with an empty batch history
+      // instead of fake sample data mixed in with real records.
+      batches: [],
 
       getById: (id) => get().batches.find((b) => b.id === id),
 

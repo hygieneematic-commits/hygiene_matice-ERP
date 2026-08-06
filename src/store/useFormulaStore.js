@@ -3,11 +3,25 @@ import { firestoreSync } from "./middleware/firestoreSync";
 import { seedFormulas } from "../data/seedFormulas";
 import { generateId } from "../utils/id";
 
-// formulasByProductId: { [productId]: { ingredients: [...], versions: [{ id, timestamp, ingredients }] } }
+// Generic starting point for a brand-new product's manufacturing method —
+// each product's steps are then fully editable/reorderable from there, per
+// product, instead of one fixed list shared by everything in Production.
+export const DEFAULT_METHOD_STEPS = [
+  "Add Water",
+  "Add Active Ingredients (per formula)",
+  "Mix for 15 Minutes",
+  "Add Perfume",
+  "Add Colour",
+  "In-process QC Check",
+];
+
+// formulasByProductId: { [productId]: { ingredients: [...], method: [{id, text}...], versions: [...] } }
 const initialFormulas = {};
 Object.entries(seedFormulas).forEach(([productId, ingredients]) => {
+  const method = DEFAULT_METHOD_STEPS.map((text) => ({ id: generateId("step"), text }));
   initialFormulas[productId] = {
     ingredients,
+    method,
     versions: [{ id: generateId("ver"), timestamp: "2026-02-10T09:00:00Z", ingredients, label: "Initial formula" }],
   };
 });
@@ -17,7 +31,7 @@ export const useFormulaStore = create(
     (set, get) => ({
       formulasByProductId: initialFormulas,
 
-      getFormula: (productId) => get().formulasByProductId[productId] || { ingredients: [], versions: [] },
+      getFormula: (productId) => get().formulasByProductId[productId] || { ingredients: [], method: [], versions: [] },
 
       // Create an empty formula shell for a brand-new product
       ensureFormula: (productId) => {
@@ -25,7 +39,7 @@ export const useFormulaStore = create(
         set({
           formulasByProductId: {
             ...get().formulasByProductId,
-            [productId]: { ingredients: [], versions: [] },
+            [productId]: { ingredients: [], method: DEFAULT_METHOD_STEPS.map((text) => ({ id: generateId("step"), text })), versions: [] },
           },
         });
       },
@@ -61,6 +75,36 @@ export const useFormulaStore = create(
             [productId]: { ...current, ingredients: updated },
           },
         });
+      },
+
+      // Manufacturing method — per-product, editable, used both here and as
+      // the actual checklist an operator works through in Production.
+      addMethodStep: (productId, text = "New step") => {
+        const current = get().getFormula(productId);
+        const updated = [...(current.method || []), { id: generateId("step"), text }];
+        set({ formulasByProductId: { ...get().formulasByProductId, [productId]: { ...current, method: updated } } });
+      },
+
+      updateMethodStep: (productId, stepId, text) => {
+        const current = get().getFormula(productId);
+        const updated = (current.method || []).map((s) => (s.id === stepId ? { ...s, text } : s));
+        set({ formulasByProductId: { ...get().formulasByProductId, [productId]: { ...current, method: updated } } });
+      },
+
+      deleteMethodStep: (productId, stepId) => {
+        const current = get().getFormula(productId);
+        const updated = (current.method || []).filter((s) => s.id !== stepId);
+        set({ formulasByProductId: { ...get().formulasByProductId, [productId]: { ...current, method: updated } } });
+      },
+
+      moveMethodStep: (productId, stepId, direction) => {
+        const current = get().getFormula(productId);
+        const steps = [...(current.method || [])];
+        const idx = steps.findIndex((s) => s.id === stepId);
+        const swapWith = direction === "up" ? idx - 1 : idx + 1;
+        if (idx < 0 || swapWith < 0 || swapWith >= steps.length) return;
+        [steps[idx], steps[swapWith]] = [steps[swapWith], steps[idx]];
+        set({ formulasByProductId: { ...get().formulasByProductId, [productId]: { ...current, method: steps } } });
       },
 
       // Saves current ingredients as a new named version snapshot

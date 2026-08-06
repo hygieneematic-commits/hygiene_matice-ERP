@@ -13,12 +13,12 @@ import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
 import { useAuditStore } from "../../store/useAuditStore";
 import { formatDateTime } from "../../utils/formatters";
-import { ROLE_PERMISSIONS } from "../../utils/permissions";
+import { ROLE_PERMISSIONS, ALL_PAGES, PAGE_LABELS } from "../../utils/permissions";
 
 const ROLES = Object.keys(ROLE_PERMISSIONS);
 const DEPARTMENTS = ["Management", "Production", "Inventory", "Sales", "Purchase", "Quality"];
 
-const blank = { name: "", username: "", password: "", email: "", mobile: "", employeeId: "", department: "Production", role: "Production Staff" };
+const blank = { name: "", username: "", password: "", email: "", mobile: "", employeeId: "", department: "Production", role: "Production Staff", pageOverrides: null };
 
 export default function Users() {
   const { users, addUser, updateUser, deleteUser, resetPassword, setActive } = useUserStore();
@@ -175,6 +175,50 @@ export default function Users() {
           <p className="text-xs text-ink-400 bg-ink-900/[0.02] border border-surface-border rounded-xl px-3.5 py-2.5">
             {ROLE_PERMISSIONS[form.role]?.description} — sidebar and pages update automatically for this role.
           </p>
+
+          <div className="border-t border-surface-border pt-4">
+            <label className="flex items-center gap-2 text-sm font-medium text-ink-700 cursor-pointer mb-3">
+              <input
+                type="checkbox"
+                checked={!!form.pageOverrides}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    pageOverrides: e.target.checked
+                      ? (ROLE_PERMISSIONS[form.role]?.pages === "all" ? [...ALL_PAGES] : [...(ROLE_PERMISSIONS[form.role]?.pages || [])])
+                      : null,
+                  })
+                }
+                className="w-4 h-4 rounded accent-brand-600"
+              />
+              Customize this person's page access (overrides the role default)
+            </label>
+            {form.pageOverrides && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-ink-900/[0.02] border border-surface-border rounded-xl p-3.5">
+                {ALL_PAGES.map((path) => {
+                  const checked = form.pageOverrides.includes(path);
+                  return (
+                    <label key={path} className="flex items-center gap-2 text-sm text-ink-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            pageOverrides: e.target.checked
+                              ? [...form.pageOverrides, path]
+                              : form.pageOverrides.filter((p) => p !== path),
+                          })
+                        }
+                        className="w-4 h-4 rounded accent-brand-600"
+                      />
+                      {PAGE_LABELS[path] || path}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </form>
       </Modal>
 

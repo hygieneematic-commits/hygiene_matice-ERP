@@ -8,22 +8,19 @@ import { Input, Label, Select } from "../../components/ui/Field";
 import { useProductStore } from "../../store/useProductStore";
 import { useProductionStore } from "../../store/useProductionStore";
 import { usePackagingStore } from "../../store/usePackagingStore";
+import { useFormulaStore } from "../../store/useFormulaStore";
+import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
 import { formatDate, formatCurrency } from "../../utils/formatters";
 import { calculateComponentPlanCost } from "../../utils/costEngine";
+import { computeFormulaLines, computeRawMaterialCost } from "../../utils/batchCalcEngine";
+import { DEFAULT_METHOD_STEPS } from "../../store/useFormulaStore";
 
-// Manufacturing Process — sequential steps, each must be completed in order (spec §4)
-const PROCESS_STEPS = [
-  "Add Water",
-  "Add Active Ingredients (per formula)",
-  "Mix for 15 Minutes",
-  "Add Perfume",
-  "Add Colour",
-  "In-process QC Check",
-];
-
-// Quality Check checklist (spec §6)
+// Quality Check checklist (spec §6) — same for every product; the
+// manufacturing PROCESS steps below are per-product now (see formula.method,
+// editable in Formula Library), falling back to DEFAULT_METHOD_STEPS for any
+// product that hasn't customized its method yet.
 const QC_ITEMS = [
   "PH Checked",
   "Colour Checked",
@@ -46,6 +43,29 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
     return map;
   }, [packagingItemsAll]);
   const planCost = useMemo(() => calculateComponentPlanCost(batch?.packagingPlan, packagingById), [batch, packagingById]);
+  const { getFormula } = useFormulaStore();
+  const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
+  const rawMaterialsById = useMemo(() => {
+    const m = {};
+    rawMaterials.forEach((r) => (m[r.id] = r));
+    return m;
+  }, [rawMaterials]);
+  // Ingredient list scaled to THIS batch's actual size — same shop-floor
+  // reference shown at creation time (NewBatchModal), also available here
+  // for an already-planned/in-progress batch so the operator doesn't have
+  // to reopen the New Batch form just to check quantities again.
+  const formula = getFormula(batch?.productId);
+  const formulaLines = useMemo(
+    () => (batch ? computeFormulaLines(formula?.ingredients, batch.quantityL, rawMaterialsById) : []),
+    [formula, batch, rawMaterialsById]
+  );
+  const rawMaterialResult = useMemo(() => computeRawMaterialCost(formulaLines), [formulaLines]);
+  // This product's own manufacturing method (editable in Formula Library) —
+  // falls back to the generic default list only if it hasn't been customized.
+  const processSteps = useMemo(() => {
+    const method = formula?.method;
+    return method && method.length > 0 ? method.map((s) => s.text) : DEFAULT_METHOD_STEPS;
+  }, [formula]);
   const users = useUserStore((s) => s.users);
   const push = useToastStore((s) => s.push);
 
@@ -81,7 +101,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
 
   if (!batch) return null;
 
-  const allProcessDone = PROCESS_STEPS.every((_, i) => processChecked[i]);
+  const allProcessDone = processSteps.every((_, i) => processChecked[i]);
   const allQcDone = QC_ITEMS.every((_, i) => qcChecked[i]);
   const isCompleted = batch.status === "completed";
   const canConfirm = allProcessDone && allQcDone && qcDecision === "approved";
@@ -163,17 +183,42 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
             <Field label="Mfg. Date" value={formatDate(batch.mfgDate)} />
           </div>
 
+          {rawMaterialResult.lines.length > 0 && (
+            <div>
+              <p className="text-sm font-semibold text-ink-900 mb-2">Raw Material Requirement — {batch.quantityL}L</p>
+              <div className="border border-surface-border rounded-xl divide-y divide-surface-border">
+                {rawMaterialResult.lines.map((line, i) => {
+                  const isKg = line.type === "weight";
+                  const displayQty = line.requiredBaseQty >= 1000 ? line.requiredBaseQty / 1000 : line.requiredBaseQty;
+                  const displayUnit = line.requiredBaseQty >= 1000 ? (isKg ? "Kg" : "L") : isKg ? "gm" : "ml";
+                  return (
+                    <div key={i} className="flex items-center justify-between px-3.5 py-2 text-sm">
+                      <span className="text-ink-700">{line.rawMaterialName}</span>
+                      <span className="font-mono font-medium text-ink-900">
+                        {displayQty.toFixed(2)} {displayUnit}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between px-3.5 py-2 text-sm bg-brand-50/50 rounded-b-xl">
+                  <span className="font-semibold text-ink-900">Total Raw Material Cost</span>
+                  <span className="font-mono font-bold text-brand-700">{formatCurrency(rawMaterialResult.totalCost)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-ink-900">Manufacturing Process</p>
               {isCompleted || batch.status === "rejected" ? (
                 <Badge tone={batch.status === "rejected" ? "danger" : "success"}>{batch.status === "rejected" ? "Rejected" : "Completed"}</Badge>
               ) : (
-                <Badge tone={allProcessDone ? "success" : "warning"}>{Object.values(processChecked).filter(Boolean).length}/{PROCESS_STEPS.length}</Badge>
+                <Badge tone={allProcessDone ? "success" : "warning"}>{Object.values(processChecked).filter(Boolean).length}/{processSteps.length}</Badge>
               )}
             </div>
             <div className="space-y-2">
-              {PROCESS_STEPS.map((step, idx) => {
+              {processSteps.map((step, idx) => {
                 const locked = !isCompleted && idx > 0 && !processChecked[idx - 1];
                 return (
                   <label
