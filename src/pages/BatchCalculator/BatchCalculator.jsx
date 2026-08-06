@@ -20,6 +20,9 @@ import {
   resolveSellingPricePerLiter,
   computeGst,
   computeProfit,
+  computeRawMaterialInputGst,
+  estimatePackagingInputGst,
+  computeGstLedger,
 } from "../../utils/batchCalcEngine";
 import { formatCurrency, formatNumber } from "../../utils/formatters";
 import clsx from "clsx";
@@ -150,6 +153,7 @@ export default function BatchCalculator() {
   const [gstMode, setGstMode] = useState("exclude"); // "exclude" | "include"
   const [gstPercent, setGstPercent] = useState(String((settings.cgstPercent ?? 9) + (settings.sgstPercent ?? 9)));
   const [gstCustom, setGstCustom] = useState(false);
+  const [packagingGstPercent, setPackagingGstPercent] = useState("18"); // assumed rate — packaging items don't carry a per-item GST% yet
 
   useEffect(() => {
     setSellingValue(String(product?.sellingPricePerL ?? ""));
@@ -265,6 +269,23 @@ export default function BatchCalculator() {
   );
 
   const isProfit = profitResult.profitPerLiter >= 0;
+
+  // ---- GST Ledger: Input GST (on purchases) vs Output GST (on sale) ----
+  const inputGstRawResult = useMemo(() => computeRawMaterialInputGst(rawMaterialResult.lines), [rawMaterialResult]);
+  const inputGstPackagingResult = useMemo(
+    () => estimatePackagingInputGst(packagingResult.packagingTotal, packagingGstPercent),
+    [packagingResult, packagingGstPercent]
+  );
+  const outputGstTotal = gstResult.gstAmountPerLiter * safeNumber(batchLiters);
+  const gstLedger = useMemo(
+    () =>
+      computeGstLedger({
+        outputGstTotal,
+        inputGstRawMaterial: inputGstRawResult.total,
+        inputGstPackaging: inputGstPackagingResult.gstAmount,
+      }),
+    [outputGstTotal, inputGstRawResult, inputGstPackagingResult]
+  );
 
   return (
     <div>
@@ -608,6 +629,59 @@ export default function BatchCalculator() {
               <Metric label="ROI %" value={`${formatNumber(profitResult.roiPercent, 2)}%`} />
               <Metric label="Contribution Margin" value={`${formatNumber(profitResult.contributionMarginPercent, 2)}%`} />
               <Metric label="Total Batch Profit" value={formatCurrency(profitResult.netProfitTotal)} tone={isProfit ? "success" : "danger"} />
+            </div>
+          </Card>
+
+          {/* GST Ledger — Input GST vs Output GST */}
+          <Card>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
+                <Receipt size={15} className="text-brand-600" />
+                GST Ledger — Input vs Output
+              </p>
+            </div>
+            <p className="text-xs text-ink-500 mb-4">
+              GST paid while purchasing raw material/packaging is reclaimable Input Tax Credit — it's netted off against
+              the GST you collect on sale, not treated as a cost.
+            </p>
+            <div className="space-y-2 text-sm mb-4">
+              <Row label="Input GST — Raw Material (actual)" value={inputGstRawResult.total} />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-ink-500 flex items-center gap-1.5">
+                  Input GST — Packaging
+                  <span className="inline-flex items-center gap-1">
+                    (assumed
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={packagingGstPercent}
+                      onChange={(e) => setPackagingGstPercent(e.target.value)}
+                      className="w-12 px-1 py-0.5 border border-surface-border rounded text-xs text-center"
+                    />
+                    %)
+                  </span>
+                </span>
+                <span className="font-mono font-medium text-ink-900">{formatCurrency(inputGstPackagingResult.gstAmount)}</span>
+              </div>
+              <div className="flex justify-between border-t border-surface-border pt-2">
+                <span className="font-semibold text-ink-900">Total Input GST (ITC available)</span>
+                <span className="font-mono font-bold text-ink-900">{formatCurrency(gstLedger.totalInputGst)}</span>
+              </div>
+              <Row label="Output GST (charged to customer)" value={gstLedger.output} />
+            </div>
+            <div
+              className={clsx(
+                "rounded-xl p-3.5 flex justify-between items-center",
+                gstLedger.isCredit ? "bg-success-50" : "bg-brand-50/60"
+              )}
+            >
+              <span className="text-sm font-semibold text-ink-900">
+                {gstLedger.isCredit ? "Net ITC Credit Carried Forward" : "Net GST Payable"}
+              </span>
+              <span className={clsx("font-mono font-bold text-lg", gstLedger.isCredit ? "text-success-600" : "text-ink-900")}>
+                {formatCurrency(Math.abs(gstLedger.netGstPayable))}
+              </span>
             </div>
           </Card>
 

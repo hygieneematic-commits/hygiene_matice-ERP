@@ -220,3 +220,53 @@ export function computeProfit({ netPricePerLiter, costPerLiter, batchLiters, bot
     contributionMarginPercent,
   };
 }
+
+// ---------------------------------------------------------------------------
+// GST LEDGER — Input GST (paid on purchases) vs Output GST (charged on sale)
+// -----------------------------------------------------------------------
+// Under Indian GST, GST paid on raw materials/packaging is Input Tax Credit
+// (ITC) — it is NOT a business expense, it's reclaimable against the GST you
+// collect on sales. What you actually owe the government is:
+//     Net GST Payable = Output GST (collected from customer) − Input GST (ITC)
+// If Input GST > Output GST for a batch, the result is negative — that's a
+// credit carried forward, not a loss. This ledger is informational (cash-flow
+// / compliance view) and does NOT change the manufacturing cost or profit
+// figures above, since ITC-eligible GST is already excluded from `basePrice`
+// wherever a raw material's `price` is GST-inclusive.
+// ---------------------------------------------------------------------------
+
+// Input GST actually paid on raw materials — uses each material's own real
+// gstPercent/includeGst (already tracked per raw material), not an assumption.
+export function computeRawMaterialInputGst(rawMaterialLines) {
+  let total = 0;
+  const lines = (rawMaterialLines || []).map((line) => {
+    const rm = line.rawMaterial;
+    if (!rm || !rm.includeGst) return { ...line, gstAmount: 0, gstPercent: 0 };
+    const gstPerUnit = safeNumber(rm.price) - safeNumber(rm.basePrice); // ₹ per L/Kg
+    const gstAmount = gstPerUnit * safeNumber(line.largeUnitQty);
+    total += gstAmount;
+    return { ...line, gstAmount, gstPercent: rm.gstPercent };
+  });
+  return { lines, total };
+}
+
+// Packaging items in this project don't carry a GST breakdown yet, so the
+// purchase price is treated as GST-inclusive at a single assumed rate
+// (defaults to 18%, editable in the UI) and the GST portion is backed out.
+// This is clearly an assumption, not a per-item fact — shown as such.
+export function estimatePackagingInputGst(packagingTotal, assumedGstPercent = 18) {
+  const rate = safeNumber(assumedGstPercent);
+  const total = safeNumber(packagingTotal);
+  const factor = rate > 0 ? rate / (100 + rate) : 0; // extract tax portion from a tax-inclusive total
+  const gstAmount = total * factor;
+  return { gstAmount, gstPercent: rate, basePortion: total - gstAmount };
+}
+
+export function computeGstLedger({ outputGstTotal, inputGstRawMaterial, inputGstPackaging }) {
+  const output = safeNumber(outputGstTotal);
+  const inputRaw = safeNumber(inputGstRawMaterial);
+  const inputPkg = safeNumber(inputGstPackaging);
+  const totalInputGst = inputRaw + inputPkg;
+  const netGstPayable = output - totalInputGst; // negative = ITC credit carried forward
+  return { output, inputRaw, inputPkg, totalInputGst, netGstPayable, isCredit: netGstPayable < 0 };
+}
