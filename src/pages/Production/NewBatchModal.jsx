@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
-import { FlaskConical } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { FlaskConical, Pencil, Plus, Trash2, RotateCcw } from "lucide-react";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
+import Badge from "../../components/ui/Badge";
 import { Label, Input, Select, Textarea, FormRow } from "../../components/ui/Field";
 import PackagingComponentBuilder from "../../components/production/PackagingComponentBuilder";
 import { useProductStore } from "../../store/useProductStore";
@@ -12,8 +13,10 @@ import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
 import { useAuditStore } from "../../store/useAuditStore";
+import { usePermissions } from "../../utils/permissions";
 import { calculateComponentPlanCost } from "../../utils/costEngine";
 import { computeFormulaLines, computeRawMaterialCost, safeNumber } from "../../utils/batchCalcEngine";
+import { toBaseUnit, unitType, ALL_UNITS } from "../../utils/units";
 import { formatCurrency, formatNumber } from "../../utils/formatters";
 
 const SHIFTS = ["Morning", "Afternoon", "Night"];
@@ -48,6 +51,7 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
   }, [rawMaterials]);
   const push = useToastStore((s) => s.push);
   const logAudit = useAuditStore((s) => s.log);
+  const { canEdit } = usePermissions();
 
   const [form, setForm] = useState({
     productId: products[0]?.id || "",
@@ -71,17 +75,82 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
   // shop floor reference so the operator knows exactly how much of each
   // ingredient this specific batch needs, no separate lookup required.
   const formula = getFormula(form.productId);
-  const formulaLines = useMemo(
+  const autoFormulaLines = useMemo(
     () => computeFormulaLines(formula?.ingredients, form.quantityL, rawMaterialsById),
     [formula, form.quantityL, rawMaterialsById]
   );
-  const rawMaterialResult = useMemo(() => computeRawMaterialCost(formulaLines), [formulaLines]);
+
+  // Batch-specific formula override — editable copy of the auto-scaled
+  // lines. Only diverges from the master formula for THIS batch; nothing
+  // here is ever written back to Formula Library. Once the user manually
+  // edits/adds/removes an ingredient, further product/quantity changes stop
+  // silently re-scaling over their edits (see "Formula edited" below) —
+  // they can explicitly "Reset to Formula" if they want to start over.
+  const [editableLines, setEditableLines] = useState(autoFormulaLines);
+  const [formulaEdited, setFormulaEdited] = useState(false);
+  const [addIngOpen, setAddIngOpen] = useState(false);
+  const [newIng, setNewIng] = useState({ rawMaterialId: rawMaterials[0]?.id || "", quantity: "", unit: "ml" });
+
+  useEffect(() => {
+    if (!formulaEdited) setEditableLines(autoFormulaLines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFormulaLines, formulaEdited]);
+
+  useEffect(() => {
+    // Switching product always starts fresh from that product's own formula.
+    setFormulaEdited(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.productId]);
+
+  const rawMaterialResult = useMemo(() => computeRawMaterialCost(editableLines), [editableLines]);
+
+  function handleLineQtyChange(index, displayQty) {
+    setEditableLines((lines) =>
+      lines.map((l, i) => {
+        if (i !== index) return l;
+        const showLarge = l.requiredBaseQty >= 1000;
+        const newBaseQty = showLarge ? safeNumber(displayQty) * 1000 : safeNumber(displayQty);
+        return { ...l, requiredBaseQty: newBaseQty };
+      })
+    );
+    setFormulaEdited(true);
+  }
+
+  function handleRemoveLine(index) {
+    setEditableLines((lines) => lines.filter((_, i) => i !== index));
+    setFormulaEdited(true);
+  }
+
+  function handleAddIngredient() {
+    const rm = rawMaterialsById[newIng.rawMaterialId];
+    if (!rm || !newIng.quantity) return;
+    const requiredBaseQty = toBaseUnit(safeNumber(newIng.quantity), newIng.unit);
+    setEditableLines((lines) => [
+      ...lines,
+      { rawMaterialId: rm.id, rawMaterialName: rm.name, type: rm.unitType, requiredBaseQty, rawMaterial: rm },
+    ]);
+    setFormulaEdited(true);
+    setAddIngOpen(false);
+    setNewIng({ rawMaterialId: rawMaterials[0]?.id || "", quantity: "", unit: "ml" });
+  }
+
+  function handleResetFormula() {
+    setEditableLines(autoFormulaLines);
+    setFormulaEdited(false);
+    push("Reset to Formula Library values", "info");
+  }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.productId || !form.quantityL) return;
-    const batch = createBatch({ ...form, quantityL: Number(form.quantityL), packagingPlan });
-    logAudit("Batch created", `${batch.batchNumber} — ${form.quantityL}L`);
+    const batch = createBatch({
+      ...form,
+      quantityL: Number(form.quantityL),
+      packagingPlan,
+      formulaOverride: formulaEdited ? editableLines : null,
+      formulaEdited,
+    });
+    logAudit("Batch created", `${batch.batchNumber} — ${form.quantityL}L${formulaEdited ? " (formula edited for this batch)" : ""}`);
     push("Batch created — run the production workflow to confirm");
     onClose();
     onCreated?.(batch);
@@ -112,24 +181,55 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
 
         {rawMaterialResult.lines.length > 0 && (
           <div className="border border-surface-border rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 bg-ink-900/[0.02] flex items-center gap-2">
-              <FlaskConical size={14} className="text-brand-600" />
-              <p className="text-xs font-semibold text-ink-900">
-                Formula Requirement — {safeNumber(form.quantityL)} L batch
-              </p>
+            <div className="px-4 py-2.5 bg-ink-900/[0.02] flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <FlaskConical size={14} className="text-brand-600" />
+                <p className="text-xs font-semibold text-ink-900">
+                  Formula Requirement — {safeNumber(form.quantityL)} L batch
+                </p>
+                {formulaEdited && <Badge tone="warning">Edited for this batch</Badge>}
+              </div>
+              {canEdit && (
+                <div className="flex items-center gap-1">
+                  {formulaEdited && (
+                    <button type="button" onClick={handleResetFormula} className="p-1.5 text-ink-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Reset to Formula Library">
+                      <RotateCcw size={13} />
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setAddIngOpen(true)} className="p-1.5 text-ink-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors" title="Add ingredient">
+                    <Plus size={13} />
+                  </button>
+                </div>
+              )}
             </div>
-            <div className="divide-y divide-surface-border max-h-52 overflow-y-auto">
+            <div className="divide-y divide-surface-border max-h-60 overflow-y-auto">
               {rawMaterialResult.lines.map((line, i) => {
                 const isKg = line.type === "weight";
                 const showLarge = line.requiredBaseQty >= 1000;
                 const qty = showLarge ? line.requiredBaseQty / 1000 : line.requiredBaseQty;
                 const unit = showLarge ? (isKg ? "Kg" : "L") : isKg ? "gm" : "ml";
                 return (
-                  <div key={i} className="flex items-center justify-between px-4 py-2 text-sm">
-                    <span className="text-ink-700">{line.rawMaterialName}</span>
-                    <span className="font-mono font-medium text-ink-900">
-                      {formatNumber(qty, 2)} {unit}
-                    </span>
+                  <div key={i} className="flex items-center justify-between px-4 py-2 text-sm gap-2">
+                    <span className="text-ink-700 truncate">{line.rawMaterialName}</span>
+                    {canEdit ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={qty}
+                          onChange={(e) => handleLineQtyChange(i, e.target.value)}
+                          className="!w-20 !py-1 !text-xs text-right"
+                        />
+                        <span className="text-xs text-ink-400 w-7">{unit}</span>
+                        <button type="button" onClick={() => handleRemoveLine(i)} className="p-1 text-ink-300 hover:text-danger-500 hover:bg-danger-50 rounded transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="font-mono font-medium text-ink-900">
+                        {formatNumber(qty, 2)} {unit}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -137,6 +237,44 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
             <div className="px-4 py-2 bg-brand-50/50 flex justify-between text-sm">
               <span className="font-semibold text-ink-900">Total Raw Material Cost</span>
               <span className="font-mono font-bold text-brand-700">{formatCurrency(rawMaterialResult.totalCost)}</span>
+            </div>
+          </div>
+        )}
+
+        {canEdit && addIngOpen && (
+          <div className="border border-brand-200 bg-brand-50/40 rounded-xl p-3.5 space-y-3">
+            <div className="flex items-center gap-2">
+              <Pencil size={13} className="text-brand-600" />
+              <p className="text-xs font-semibold text-ink-900">Add Ingredient — this batch only</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Select
+                value={newIng.rawMaterialId}
+                onChange={(e) => {
+                  const rm = rawMaterialsById[e.target.value];
+                  setNewIng({ ...newIng, rawMaterialId: e.target.value, unit: rm?.unitType === "weight" ? "gm" : "ml" });
+                }}
+                className="!text-xs col-span-1"
+              >
+                {rawMaterials.map((rm) => <option key={rm.id} value={rm.id}>{rm.name}</option>)}
+              </Select>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="Qty"
+                value={newIng.quantity}
+                onChange={(e) => setNewIng({ ...newIng, quantity: e.target.value })}
+                className="!text-xs"
+              />
+              <Select value={newIng.unit} onChange={(e) => setNewIng({ ...newIng, unit: e.target.value })} className="!text-xs">
+                {ALL_UNITS.filter((u) => unitType(u) === (rawMaterialsById[newIng.rawMaterialId]?.unitType || "volume")).map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setAddIngOpen(false)}>Cancel</Button>
+              <Button type="button" size="sm" onClick={handleAddIngredient}>Add</Button>
             </div>
           </div>
         )}

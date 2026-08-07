@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Droplets, LogIn, AlertCircle } from "lucide-react";
+import { LogIn, AlertCircle } from "lucide-react";
 import { useNavigate, useLocation, Navigate } from "react-router-dom";
 import { useAuthStore } from "../../store/useAuthStore";
 import { Input, Label } from "../../components/ui/Field";
@@ -35,8 +35,8 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-surface-bg bg-mesh-light px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-brand-gradient flex items-center justify-center shadow-soft mb-4">
-            <Droplets size={26} className="text-white" strokeWidth={2.5} />
+          <div className="w-16 h-16 rounded-2xl bg-white flex items-center justify-center shadow-soft mb-4 overflow-hidden">
+            <img src="/logo-192.png" alt="Hygiene Matic" className="w-full h-full object-contain" />
           </div>
           <p className="font-display font-bold text-ink-900 text-xl">Hygiene Matic</p>
           <p className="text-sm text-ink-400 mt-0.5">Manufacturing OS — sign in to continue</p>

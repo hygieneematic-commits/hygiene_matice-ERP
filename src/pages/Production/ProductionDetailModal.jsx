@@ -55,10 +55,15 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
   // for an already-planned/in-progress batch so the operator doesn't have
   // to reopen the New Batch form just to check quantities again.
   const formula = getFormula(batch?.productId);
-  const formulaLines = useMemo(
-    () => (batch ? computeFormulaLines(formula?.ingredients, batch.quantityL, rawMaterialsById) : []),
-    [formula, batch, rawMaterialsById]
-  );
+  // This product's own manufacturing ingredient list for THIS batch — uses
+  // the batch's formula override if one was set at creation time (so what's
+  // shown here always matches what confirmProduction will actually deduct),
+  // otherwise falls back to the master formula scaled to quantityL.
+  const formulaLines = useMemo(() => {
+    if (!batch) return [];
+    if (batch.formulaOverride?.length) return batch.formulaOverride;
+    return computeFormulaLines(formula?.ingredients, batch.quantityL, rawMaterialsById);
+  }, [formula, batch, rawMaterialsById]);
   const rawMaterialResult = useMemo(() => computeRawMaterialCost(formulaLines), [formulaLines]);
   // This product's own manufacturing method (editable in Formula Library) —
   // falls back to the generic default list only if it hasn't been customized.
@@ -185,7 +190,10 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
 
           {rawMaterialResult.lines.length > 0 && (
             <div>
-              <p className="text-sm font-semibold text-ink-900 mb-2">Raw Material Requirement — {batch.quantityL}L</p>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-semibold text-ink-900">Raw Material Requirement — {batch.quantityL}L</p>
+                {batch.formulaEdited && <Badge tone="warning">Formula edited for this batch</Badge>}
+              </div>
               <div className="border border-surface-border rounded-xl divide-y divide-surface-border">
                 {rawMaterialResult.lines.map((line, i) => {
                   const isKg = line.type === "weight";

@@ -18,7 +18,7 @@ export const useProductionStore = create(
       getById: (id) => get().batches.find((b) => b.id === id),
 
       // Create a planned batch (does NOT touch inventory yet)
-      createBatch: ({ productId, quantityL, operator, supervisor, shift, notes, mfgDate, expiryDate, yieldPercent, packagingPlan }) => {
+      createBatch: ({ productId, quantityL, operator, supervisor, shift, notes, mfgDate, expiryDate, yieldPercent, packagingPlan, formulaOverride, formulaEdited }) => {
         const product = useProductStore.getState().getById(productId);
         const batch = {
           id: generateId("batch"),
@@ -35,6 +35,12 @@ export const useProductionStore = create(
           mfgDate: mfgDate || new Date().toISOString().slice(0, 10),
           expiryDate: expiryDate || "",
           packagingPlan: packagingPlan || [],
+          // Batch-specific formula override — set only when someone edited
+          // ingredient quantities for THIS batch at creation time. Never
+          // written back to the Formula Library master formula. `null` means
+          // "use the master formula, scaled to quantityL, as usual".
+          formulaOverride: formulaOverride || null,
+          formulaEdited: !!formulaEdited,
           qc: null,
         };
         set({ batches: [batch, ...get().batches] });
@@ -47,15 +53,25 @@ export const useProductionStore = create(
         if (!batch || batch.status === "completed") return;
 
         const product = useProductStore.getState().getById(batch.productId);
-        const formula = useFormulaStore.getState().getFormula(batch.productId);
         const rawMaterialsById = useRawMaterialStore.getState().getByIdMap();
         const packagingById = usePackagingStore.getState().getByIdMap();
 
-        const scaled = scaleFormula(formula.ingredients, batch.quantityL, rawMaterialsById);
-        scaled.forEach((ing) => {
-          const largeUnitQty = ing.scaledBaseQty / 1000;
-          useRawMaterialStore.getState().adjustStock(ing.rawMaterialId, -largeUnitQty);
-        });
+        // A batch-specific formula override (edited at creation time) takes
+        // priority over the master Formula Library — deduct exactly what was
+        // actually planned for this batch, not what the master formula says.
+        if (batch.formulaOverride?.length) {
+          batch.formulaOverride.forEach((ing) => {
+            const largeUnitQty = ing.requiredBaseQty / 1000;
+            useRawMaterialStore.getState().adjustStock(ing.rawMaterialId, -largeUnitQty);
+          });
+        } else {
+          const formula = useFormulaStore.getState().getFormula(batch.productId);
+          const scaled = scaleFormula(formula.ingredients, batch.quantityL, rawMaterialsById);
+          scaled.forEach((ing) => {
+            const largeUnitQty = ing.scaledBaseQty / 1000;
+            useRawMaterialStore.getState().adjustStock(ing.rawMaterialId, -largeUnitQty);
+          });
+        }
 
         if (batch.packagingPlan?.length) {
           // Custom component-based split defined for this batch — deduct exactly

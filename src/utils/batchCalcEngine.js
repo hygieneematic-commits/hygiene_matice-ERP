@@ -146,13 +146,21 @@ export function computeOverheadCost({ batchLiters, labour, electricity, transpor
 // twice — packaging cost has exactly one source: the Step 4 configuration.
 // ---------------------------------------------------------------------------
 export function computeGrandTotal({ rawMaterialTotal, packagingTotal, overheadTotal, batchLiters, bottleUnits }) {
-  const grandTotal = safeNumber(rawMaterialTotal) + safeNumber(packagingTotal) + safeNumber(overheadTotal);
+  const raw = safeNumber(rawMaterialTotal);
+  const pkg = safeNumber(packagingTotal);
+  const overhead = safeNumber(overheadTotal);
+  const grandTotal = raw + pkg + overhead;
   const liters = safeNumber(batchLiters);
   const units = safeNumber(bottleUnits);
   return {
     grandTotal,
     costPerLiter: liters > 0 ? grandTotal / liters : 0,
     costPerBottle: units > 0 ? grandTotal / units : 0,
+    // Per-liter breakdown by cost category — so "why is my cost/L what it
+    // is" is answerable at a glance, not just the combined total.
+    rawMaterialCostPerLiter: liters > 0 ? raw / liters : 0,
+    packagingCostPerLiter: liters > 0 ? pkg / liters : 0,
+    otherChargesCostPerLiter: liters > 0 ? overhead / liters : 0,
   };
 }
 

@@ -12,7 +12,6 @@ import {
   History,
   Users,
   Settings,
-  Droplets,
   X,
   ClipboardList,
   LogOut,
@@ -62,8 +61,8 @@ export default function Sidebar({ open, onClose, className }) {
       >
         <div className="flex items-center justify-between px-5 h-[72px] border-b border-surface-border">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-brand-gradient flex items-center justify-center shadow-soft shrink-0">
-              <Droplets size={18} className="text-white" strokeWidth={2.5} />
+            <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center shadow-soft shrink-0 overflow-hidden">
+              <img src="/logo-192.png" alt="Hygiene Matic" className="w-full h-full object-contain" />
             </div>
             <div className="leading-tight">
               <p className="font-display font-bold text-ink-900 text-[15px]">Hygiene Matic</p>

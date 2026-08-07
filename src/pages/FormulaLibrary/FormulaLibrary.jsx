@@ -1,19 +1,25 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, FlaskConical, ChevronRight, Layers } from "lucide-react";
+import { Search, FlaskConical, ChevronRight, Layers, Plus } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
+import Button from "../../components/ui/Button";
 import { Input } from "../../components/ui/Field";
 import EmptyState from "../../components/ui/EmptyState";
+import ProductFormModal from "../Products/ProductFormModal";
 import { useProductStore } from "../../store/useProductStore";
 import { useFormulaStore } from "../../store/useFormulaStore";
+import { useToastStore } from "../../store/useToastStore";
 
 export default function FormulaLibrary() {
   const navigate = useNavigate();
   const products = useProductStore((s) => s.products);
   const formulasByProductId = useFormulaStore((s) => s.formulasByProductId);
+  const ensureFormula = useFormulaStore((s) => s.ensureFormula);
+  const push = useToastStore((s) => s.push);
   const [query, setQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -21,9 +27,29 @@ export default function FormulaLibrary() {
     return products.filter((p) => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
   }, [products, query]);
 
+  function handleProductSaved(productId, isNew) {
+    setAddOpen(false);
+    if (isNew) {
+      // New product needs a formula shell before its detail page can add
+      // ingredients — then jump straight there so the user can define the
+      // base formula immediately, in the same flow they started.
+      ensureFormula(productId);
+      push("Product created — now add its base formula", "success");
+      navigate(`/formula-library/${productId}`);
+    }
+  }
+
   return (
     <div>
-      <PageHeader title="Formula Library" subtitle="Every product's base formula, defined per 1 Liter" />
+      <PageHeader
+        title="Formula Library"
+        subtitle="Every product's base formula, defined per 1 Liter"
+        actions={
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus size={16} /> Add New Product
+          </Button>
+        }
+      />
 
       <div className="mb-5 max-w-sm relative">
         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -31,7 +57,14 @@ export default function FormulaLibrary() {
       </div>
 
       {filtered.length === 0 ? (
-        <Card><EmptyState icon={FlaskConical} title="No formulas found" description="Try a different search term." /></Card>
+        <Card>
+          <EmptyState
+            icon={FlaskConical}
+            title="No formulas found"
+            description="Try a different search term, or add a new product."
+            action={<Button onClick={() => setAddOpen(true)}><Plus size={16} /> Add New Product</Button>}
+          />
+        </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((product) => {
@@ -60,6 +93,8 @@ export default function FormulaLibrary() {
           })}
         </div>
       )}
+
+      <ProductFormModal open={addOpen} onClose={() => setAddOpen(false)} product={null} onSaved={handleProductSaved} />
     </div>
   );
 }

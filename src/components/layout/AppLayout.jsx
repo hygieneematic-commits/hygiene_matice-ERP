@@ -24,6 +24,9 @@ export default function AppLayout() {
 
   useEffect(() => {
     setSidebarOpen(false);
+    // Every page should open at the top, not wherever the previous page had
+    // scrolled to — this was the mobile "page opens from the middle" bug.
+    window.scrollTo(0, 0);
   }, [location.pathname]);
 
   return (

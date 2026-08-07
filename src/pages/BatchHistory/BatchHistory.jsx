@@ -41,7 +41,12 @@ export default function BatchHistory() {
   }, [batches, query, statusFilter]);
 
   const columns = [
-    { key: "batchNumber", header: "Batch #", render: (row) => <span className="font-mono text-sm text-ink-900">{row.batchNumber}</span> },
+    { key: "batchNumber", header: "Batch #", render: (row) => (
+      <span className="font-mono text-sm text-ink-900 inline-flex items-center gap-1.5">
+        {row.batchNumber}
+        {row.formulaEdited && <span title="Formula was edited for this batch" className="w-1.5 h-1.5 rounded-full bg-warning-500 shrink-0" />}
+      </span>
+    ) },
     { key: "product", header: "Product", render: (row) => <span className="font-medium text-ink-900">{productName(row.productId)}</span> },
     { key: "quantityL", header: "Qty", align: "right", render: (row) => `${row.quantityL} L` },
     { key: "operator", header: "Operator" },

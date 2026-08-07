@@ -505,8 +505,16 @@ export default function BatchCalculator() {
                 <span className="text-sm font-semibold text-ink-900">Total Manufacturing Cost</span>
                 <span className="text-sm font-mono font-bold text-ink-900">{formatCurrency(grandTotalResult.grandTotal)}</span>
               </div>
+              <div className="border-t border-surface-border pt-3">
+                <p className="text-[11px] font-semibold text-ink-400 uppercase tracking-wide mb-1.5">Cost Per Liter — Breakdown</p>
+                <div className="space-y-1.5">
+                  <Row label="Raw Material Cost /L" value={grandTotalResult.rawMaterialCostPerLiter} />
+                  <Row label="Packaging Cost /L" value={grandTotalResult.packagingCostPerLiter} />
+                  <Row label="Other Charges /L" value={grandTotalResult.otherChargesCostPerLiter} />
+                </div>
+              </div>
               <div className="bg-brand-50/60 rounded-xl p-3 space-y-1.5">
-                <Row label="Cost Per Liter" value={grandTotalResult.costPerLiter} />
+                <Row label="Total Cost Per Liter" value={grandTotalResult.costPerLiter} />
                 <Row label={`Cost Per Packaging Unit (${bottleUnits} units)`} value={grandTotalResult.costPerBottle} />
               </div>
             </div>
