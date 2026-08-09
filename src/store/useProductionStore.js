@@ -18,7 +18,7 @@ export const useProductionStore = create(
       getById: (id) => get().batches.find((b) => b.id === id),
 
       // Create a planned batch (does NOT touch inventory yet)
-      createBatch: ({ productId, quantityL, operator, supervisor, shift, notes, mfgDate, expiryDate, yieldPercent, packagingPlan, formulaOverride, formulaEdited }) => {
+      createBatch: ({ productId, quantityL, operator, supervisor, shift, notes, mfgDate, expiryDate, startTime, endTime, yieldPercent, packagingPlan, formulaOverride, formulaEdited }) => {
         const product = useProductStore.getState().getById(productId);
         const batch = {
           id: generateId("batch"),
@@ -33,6 +33,8 @@ export const useProductionStore = create(
           status: "planned",
           date: new Date().toISOString(),
           mfgDate: mfgDate || new Date().toISOString().slice(0, 10),
+          startTime: startTime || "",
+          endTime: endTime || "",
           expiryDate: expiryDate || "",
           packagingPlan: packagingPlan || [],
           // Batch-specific formula override — set only when someone edited

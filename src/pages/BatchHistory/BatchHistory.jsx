@@ -50,6 +50,7 @@ export default function BatchHistory() {
     { key: "product", header: "Product", render: (row) => <span className="font-medium text-ink-900">{productName(row.productId)}</span> },
     { key: "quantityL", header: "Qty", align: "right", render: (row) => `${row.quantityL} L` },
     { key: "operator", header: "Operator" },
+    { key: "shift", header: "Shift", render: (row) => <span className="text-ink-500 text-sm">{row.shift || "—"}</span> },
     { key: "yieldPercent", header: "Yield", align: "right", render: (row) => `${row.yieldPercent}%` },
     {
       key: "status",

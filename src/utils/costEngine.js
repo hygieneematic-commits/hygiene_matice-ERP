@@ -319,7 +319,16 @@ export function calculateMaterialUsage({ rawMaterialId, batches, formulasByProdu
   batches
     .filter((b) => b.status === "completed" && new Date(b.date) >= since)
     .forEach((b) => {
-      const formula = formulasByProductId[b.productId] || [];
+      // A batch with a formula override (edited ingredients for just that
+      // batch) already has its exact quantities recorded — use those first,
+      // since that's what was actually deducted from stock. Only fall back
+      // to re-deriving from the master formula when there's no override.
+      if (b.formulaOverride?.length) {
+        const ing = b.formulaOverride.find((i) => i.rawMaterialId === rawMaterialId);
+        if (ing) totalBase += ing.requiredBaseQty;
+        return;
+      }
+      const formula = formulasByProductId[b.productId]?.ingredients || [];
       const ing = formula.find((i) => i.rawMaterialId === rawMaterialId);
       if (!ing) return;
       totalBase += toBaseUnit(ing.quantity, ing.unit) * b.quantityL;
@@ -336,7 +345,7 @@ export function estimateRemainingProduction({ rawMaterialId, rawMaterialsById, f
   let best = null;
   products.forEach((product) => {
     if (!product.active) return;
-    const formula = formulasByProductId[product.id] || [];
+    const formula = formulasByProductId[product.id]?.ingredients || [];
     const ing = formula.find((i) => i.rawMaterialId === rawMaterialId);
     if (!ing) return;
     const baseQtyFor1L = toBaseUnit(ing.quantity, ing.unit);

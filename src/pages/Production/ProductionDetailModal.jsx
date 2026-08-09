@@ -81,6 +81,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
   const [seconds, setSeconds] = useState(0);
   const [running, setRunning] = useState(false);
   const [yieldPercent, setYieldPercent] = useState(100);
+  const [endTime, setEndTime] = useState("");
   const intervalRef = useRef(null);
 
   useEffect(() => {
@@ -92,6 +93,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
       setSeconds(0);
       setRunning(false);
       setYieldPercent(batch.yieldPercent ?? 100);
+      setEndTime(batch.endTime || "");
     }
   }, [open, batch]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -128,6 +130,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
   function handleConfirm() {
     updateBatch(batch.id, {
       yieldPercent: Number(yieldPercent),
+      endTime: endTime || new Date().toTimeString().slice(0, 5),
       qc: {
         items: QC_ITEMS.filter((_, i) => qcChecked[i]),
         decision: qcDecision,
@@ -186,6 +189,8 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
             <Field label="Supervisor" value={batch.supervisor || "—"} />
             <Field label="Shift" value={batch.shift || "—"} />
             <Field label="Mfg. Date" value={formatDate(batch.mfgDate)} />
+            <Field label="Start Time" value={batch.startTime || "—"} />
+            <Field label="End Time" value={batch.endTime || "—"} />
           </div>
 
           {rawMaterialResult.lines.length > 0 && (
@@ -272,7 +277,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
             </div>
 
             {!isCompleted && batch.status !== "rejected" ? (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
                   <Label>QC Decision</Label>
                   <Select value={qcDecision} onChange={(e) => setQcDecision(e.target.value)}>
@@ -289,6 +294,10 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
                 <div>
                   <Label hint="%">Yield</Label>
                   <Input type="number" step="0.1" max="100" value={yieldPercent} onChange={(e) => setYieldPercent(e.target.value)} />
+                </div>
+                <div>
+                  <Label hint="filled automatically if left blank">Production End Time</Label>
+                  <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
                 </div>
               </div>
             ) : (

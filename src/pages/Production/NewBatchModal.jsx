@@ -19,7 +19,7 @@ import { computeFormulaLines, computeRawMaterialCost, safeNumber } from "../../u
 import { toBaseUnit, unitType, ALL_UNITS } from "../../utils/units";
 import { formatCurrency, formatNumber } from "../../utils/formatters";
 
-const SHIFTS = ["Morning", "Afternoon", "Night"];
+const SHIFTS = ["Morning", "Afternoon", "Evening"];
 const PACKAGING_CATEGORIES = ["Bottle", "Label", "Carton", "Tape", "Cap", "Shrink"];
 
 export default function NewBatchModal({ open, onClose, onCreated }) {
@@ -60,6 +60,8 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
     supervisor: users[1]?.name || users[0]?.name || "",
     shift: "Morning",
     mfgDate: new Date().toISOString().slice(0, 10),
+    startTime: new Date().toTimeString().slice(0, 5),
+    endTime: "",
     expiryDate: "",
     notes: "",
   });
@@ -307,6 +309,16 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
           <div>
             <Label hint="Optional">Expiry Date</Label>
             <Input type="date" value={form.expiryDate} onChange={(e) => set("expiryDate", e.target.value)} />
+          </div>
+        </FormRow>
+        <FormRow cols={2}>
+          <div>
+            <Label>Production Start Time</Label>
+            <Input type="time" value={form.startTime} onChange={(e) => set("startTime", e.target.value)} />
+          </div>
+          <div>
+            <Label hint="Optional — fill in when the batch finishes">Production End Time</Label>
+            <Input type="time" value={form.endTime} onChange={(e) => set("endTime", e.target.value)} />
           </div>
         </FormRow>
 

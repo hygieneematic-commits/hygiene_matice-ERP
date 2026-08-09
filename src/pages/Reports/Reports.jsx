@@ -37,7 +37,7 @@ export default function Reports() {
   const dailyRows = useMemo(
     () =>
       completed
-        .map((b) => [formatDate(b.date), productName(b.productId), b.batchNumber, `${b.quantityL} L`, b.operator, `${b.yieldPercent}%`])
+        .map((b) => [formatDate(b.date), productName(b.productId), b.batchNumber, `${b.quantityL} L`, b.operator, b.shift || "—", `${b.yieldPercent}%`])
         .sort((a, b2) => (a[0] < b2[0] ? 1 : -1)),
     [completed]
   );
@@ -102,7 +102,7 @@ export default function Reports() {
 
   const config = {
     "Daily Production": {
-      columns: ["Date", "Product", "Batch #", "Quantity", "Operator", "Yield"],
+      columns: ["Date", "Product", "Batch #", "Quantity", "Operator", "Shift", "Yield"],
       rows: dailyRows,
     },
     "Monthly Production": {
