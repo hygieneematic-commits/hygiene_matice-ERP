@@ -77,10 +77,10 @@ export default function BatchHistory() {
       header: "",
       align: "right",
       render: (row) =>
-        // Only Super Admin can delete a batch record — every other role that
-        // can reach this page (Production Manager/Staff, QC) can view/manage
-        // batches but must not be able to erase history.
-        row.status === "planned" && role === "Super Admin" && (
+        // Only Super Admin can delete a batch record, regardless of its
+        // status — needed so Super Admin can actually clean up test/mistake
+        // entries from history, not just batches still in "planned" state.
+        role === "Super Admin" && (
           <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors">
             <Trash2 size={15} />
           </button>
@@ -112,9 +112,13 @@ export default function BatchHistory() {
       <ConfirmDialog
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => { deleteBatch(deleteTarget.id); push("Planned batch deleted", "info"); }}
-        title="Delete this planned batch?"
-        description="This only removes the plan — no inventory has been deducted yet."
+        onConfirm={() => { deleteBatch(deleteTarget.id); push("Batch deleted", "info"); setDeleteTarget(null); }}
+        title={`Delete batch ${deleteTarget?.batchNumber || ""}?`}
+        description={
+          deleteTarget?.status === "completed"
+            ? "This batch already deducted raw material/packaging stock when it was confirmed — deleting the record here does NOT restore that stock. Only delete this if you're cleaning up a genuine mistake/test entry."
+            : "This removes the batch record permanently. This cannot be undone."
+        }
       />
     </div>
   );

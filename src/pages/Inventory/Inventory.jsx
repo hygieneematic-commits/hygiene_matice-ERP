@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Warehouse, AlertTriangle, Plus, Minus, Search } from "lucide-react";
+import { Warehouse, AlertTriangle, Plus, Minus, Search, PackagePlus } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
@@ -14,6 +14,7 @@ import { useProductionStore } from "../../store/useProductionStore";
 import { useFormulaStore } from "../../store/useFormulaStore";
 import { useProductStore } from "../../store/useProductStore";
 import { useToastStore } from "../../store/useToastStore";
+import { usePermissions } from "../../utils/permissions";
 import { calculateMaterialUsage, estimateRemainingProduction } from "../../utils/costEngine";
 import clsx from "clsx";
 
@@ -22,15 +23,20 @@ export default function Inventory() {
   const [query, setQuery] = useState("");
   const [adjustTarget, setAdjustTarget] = useState(null);
   const [adjustValue, setAdjustValue] = useState("");
+  const [restockTarget, setRestockTarget] = useState(null);
+  const [restockValue, setRestockValue] = useState("");
 
   const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
   const adjustRawStock = useRawMaterialStore((s) => s.adjustStock);
+  const updateRawMaterial = useRawMaterialStore((s) => s.updateRawMaterial);
   const packagingItems = usePackagingStore((s) => s.packagingItems);
   const adjustPkgStock = usePackagingStore((s) => s.adjustStock);
+  const updatePackaging = usePackagingStore((s) => s.updatePackaging);
   const batches = useProductionStore((s) => s.batches);
   const formulasByProductId = useFormulaStore((s) => s.formulasByProductId);
   const products = useProductStore((s) => s.products);
   const push = useToastStore((s) => s.push);
+  const { canEdit } = usePermissions();
 
   const rawMaterialsById = useMemo(() => {
     const m = {};
@@ -65,6 +71,27 @@ export default function Inventory() {
     setAdjustTarget(null);
   }
 
+  function openRestock(item) {
+    setRestockTarget(item);
+    setRestockValue("");
+  }
+
+  function handleRestock() {
+    const val = Number(restockValue);
+    if (!val || val <= 0) return;
+    if (tab === "raw") adjustRawStock(restockTarget.id, val);
+    else adjustPkgStock(restockTarget.id, val);
+    push(`${val} added to ${restockTarget.name} stock`, "success");
+    setRestockTarget(null);
+  }
+
+  function handleMinStockChange(row, value) {
+    const minStock = Number(value);
+    if (Number.isNaN(minStock) || minStock < 0) return;
+    if (tab === "raw") updateRawMaterial(row.id, { minStock });
+    else updatePackaging(row.id, { minStock });
+  }
+
   const columns = [
     { key: "name", header: "Item", render: (row) => <p className="font-medium text-ink-900">{row.name}</p> },
     {
@@ -81,7 +108,23 @@ export default function Inventory() {
       key: "minStock",
       header: "Min. Level",
       align: "right",
-      render: (row) => <span className="text-ink-500">{row.minStock} {tab === "raw" ? (row.unitType === "weight" ? "Kg" : "L") : "pcs"}</span>,
+      render: (row) =>
+        canEdit ? (
+          <div className="flex items-center justify-end gap-1.5">
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={row.minStock}
+              onBlur={(e) => handleMinStockChange(row, e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+              className="!w-20 !py-1 !text-xs text-right"
+            />
+            <span className="text-xs text-ink-400 w-7">{tab === "raw" ? (row.unitType === "weight" ? "Kg" : "L") : "pcs"}</span>
+          </div>
+        ) : (
+          <span className="text-ink-500">{row.minStock} {tab === "raw" ? (row.unitType === "weight" ? "Kg" : "L") : "pcs"}</span>
+        ),
     },
     ...(tab === "raw"
       ? [
@@ -132,9 +175,14 @@ export default function Inventory() {
       header: "",
       align: "right",
       render: (row) => (
-        <Button size="sm" variant="secondary" onClick={() => openAdjust(row)}>
-          Adjust Stock
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          <Button size="sm" variant="success" onClick={() => openRestock(row)} title="Quickly add stock received">
+            <PackagePlus size={13} /> Restock
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => openAdjust(row)}>
+            Adjust Stock
+          </Button>
+        </div>
       ),
     },
   ];
@@ -186,6 +234,19 @@ export default function Inventory() {
               <Minus size={15} /> Remove Stock
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!restockTarget}
+        onClose={() => setRestockTarget(null)}
+        title={`Restock — ${restockTarget?.name}`}
+        subtitle={`Current: ${restockTarget?.stock} ${tab === "raw" ? (restockTarget?.unitType === "weight" ? "Kg" : "L") : "pcs"} · Min level: ${restockTarget?.minStock}`}
+        footer={<><Button variant="secondary" onClick={() => setRestockTarget(null)}>Cancel</Button><Button variant="success" onClick={handleRestock}><PackagePlus size={15} /> Add to Stock</Button></>}
+      >
+        <div>
+          <Label hint={tab === "raw" ? (restockTarget?.unitType === "weight" ? "Kg" : "L") : "pcs"}>Quantity Received</Label>
+          <Input type="number" min="0" step="0.01" value={restockValue} onChange={(e) => setRestockValue(e.target.value)} placeholder="e.g. 50" autoFocus />
         </div>
       </Modal>
     </div>
