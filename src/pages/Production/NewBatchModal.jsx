@@ -150,6 +150,7 @@ export default function NewBatchModal({ open, onClose, onCreated }) {
       quantityL: Number(form.quantityL),
       packagingPlan,
       formulaOverride: formulaEdited ? editableLines : null,
+      formulaOriginal: formulaEdited ? autoFormulaLines : null,
       formulaEdited,
     });
     logAudit("Batch created", `${batch.batchNumber} — ${form.quantityL}L${formulaEdited ? " (formula edited for this batch)" : ""}`);

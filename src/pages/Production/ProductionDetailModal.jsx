@@ -12,10 +12,12 @@ import { useFormulaStore } from "../../store/useFormulaStore";
 import { useRawMaterialStore } from "../../store/useRawMaterialStore";
 import { useUserStore } from "../../store/useUserStore";
 import { useToastStore } from "../../store/useToastStore";
-import { formatDate, formatCurrency } from "../../utils/formatters";
-import { calculateComponentPlanCost } from "../../utils/costEngine";
-import { computeFormulaLines, computeRawMaterialCost } from "../../utils/batchCalcEngine";
+import { useSettingsStore } from "../../store/useSettingsStore";
+import { formatDate, formatCurrency, formatNumber } from "../../utils/formatters";
+import { calculateComponentPlanCost, calculateOverheadCost } from "../../utils/costEngine";
+import { computeFormulaLines, computeRawMaterialCost, safeNumber } from "../../utils/batchCalcEngine";
 import { DEFAULT_METHOD_STEPS } from "../../store/useFormulaStore";
+import clsx from "clsx";
 
 // Quality Check checklist (spec §6) — same for every product; the
 // manufacturing PROCESS steps below are per-product now (see formula.method,
@@ -42,7 +44,13 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
     packagingItemsAll.forEach((p) => (map[p.id] = p));
     return map;
   }, [packagingItemsAll]);
-  const planCost = useMemo(() => calculateComponentPlanCost(batch?.packagingPlan, packagingById), [batch, packagingById]);
+  const planCost = useMemo(() => {
+    // A completed batch shows its FROZEN packaging cost snapshot — taken at
+    // confirmation time — instead of recomputing with today's packaging
+    // prices, so a later price change never rewrites completed history.
+    if (batch?.status === "completed" && batch.costSnapshot?.packaging) return batch.costSnapshot.packaging;
+    return calculateComponentPlanCost(batch?.packagingPlan, packagingById);
+  }, [batch, packagingById]);
   const { getFormula } = useFormulaStore();
   const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
   const rawMaterialsById = useMemo(() => {
@@ -64,7 +72,36 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
     if (batch.formulaOverride?.length) return batch.formulaOverride;
     return computeFormulaLines(formula?.ingredients, batch.quantityL, rawMaterialsById);
   }, [formula, batch, rawMaterialsById]);
-  const rawMaterialResult = useMemo(() => computeRawMaterialCost(formulaLines), [formulaLines]);
+  const rawMaterialResult = useMemo(() => {
+    // Same freeze principle as packaging above — a completed batch's raw
+    // material cost is locked to what it actually cost at production time.
+    if (batch?.status === "completed" && batch.costSnapshot?.rawMaterial) return batch.costSnapshot.rawMaterial;
+    return computeRawMaterialCost(formulaLines);
+  }, [formulaLines, batch]);
+  const settings = useSettingsStore((s) => s.settings);
+  const finalCost = useMemo(() => {
+    if (!batch) return null;
+    if (batch.status === "completed" && batch.costSnapshot) {
+      const units = planCost.breakdown.reduce((sum, l) => sum + (l.units || 0), 0);
+      return {
+        totalCost: batch.costSnapshot.totalCost,
+        costPerLiter: batch.costSnapshot.costPerLiter,
+        costPerUnit: units > 0 ? batch.costSnapshot.totalCost / units : 0,
+        overhead: batch.costSnapshot.overhead,
+        frozen: true,
+      };
+    }
+    const overhead = calculateOverheadCost(batch.quantityL, settings);
+    const totalCost = rawMaterialResult.totalCost + planCost.totalCost + overhead.total;
+    const units = planCost.breakdown.reduce((sum, l) => sum + (l.units || 0), 0);
+    return {
+      totalCost,
+      costPerLiter: batch.quantityL > 0 ? totalCost / batch.quantityL : 0,
+      costPerUnit: units > 0 ? totalCost / units : 0,
+      overhead,
+      frozen: false,
+    };
+  }, [batch, rawMaterialResult, planCost, settings]);
   // This product's own manufacturing method (editable in Formula Library) —
   // falls back to the generic default list only if it hasn't been customized.
   const processSteps = useMemo(() => {
@@ -82,6 +119,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
   const [running, setRunning] = useState(false);
   const [yieldPercent, setYieldPercent] = useState(100);
   const [endTime, setEndTime] = useState("");
+  const [allowPackagingMismatch, setAllowPackagingMismatch] = useState(false);
   const intervalRef = useRef(null);
 
   useEffect(() => {
@@ -94,6 +132,7 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
       setRunning(false);
       setYieldPercent(batch.yieldPercent ?? 100);
       setEndTime(batch.endTime || "");
+      setAllowPackagingMismatch(false);
     }
   }, [open, batch]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -111,7 +150,14 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
   const allProcessDone = processSteps.every((_, i) => processChecked[i]);
   const allQcDone = QC_ITEMS.every((_, i) => qcChecked[i]);
   const isCompleted = batch.status === "completed";
-  const canConfirm = allProcessDone && allQcDone && qcDecision === "approved";
+  // Packaging Total must equal Batch Quantity before finalization (spec §6)
+  // — only enforced when a packaging plan actually exists for this batch;
+  // legacy/simple batches without one skip this check entirely.
+  const hasPackagingPlan = planCost.breakdown.length > 0;
+  const packagingMl = planCost.totalMl;
+  const targetMl = safeNumber(batch.quantityL) * 1000;
+  const packagingMatches = !hasPackagingPlan || Math.abs(packagingMl - targetMl) < 1;
+  const canConfirm = allProcessDone && allQcDone && qcDecision === "approved" && (packagingMatches || allowPackagingMismatch);
 
   function formatTime(total) {
     const m = String(Math.floor(total / 60)).padStart(2, "0");
@@ -204,11 +250,24 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
                   const isKg = line.type === "weight";
                   const displayQty = line.requiredBaseQty >= 1000 ? line.requiredBaseQty / 1000 : line.requiredBaseQty;
                   const displayUnit = line.requiredBaseQty >= 1000 ? (isKg ? "Kg" : "L") : isKg ? "gm" : "ml";
+                  const originalLine = batch.formulaOriginal?.find((o) => o.rawMaterialId === line.rawMaterialId);
+                  const originalDisplayQty = originalLine
+                    ? (originalLine.requiredBaseQty >= 1000 ? originalLine.requiredBaseQty / 1000 : originalLine.requiredBaseQty)
+                    : null;
+                  const changed = originalLine && Math.abs(originalLine.requiredBaseQty - line.requiredBaseQty) > 0.001;
                   return (
                     <div key={i} className="flex items-center justify-between px-3.5 py-2 text-sm">
                       <span className="text-ink-700">{line.rawMaterialName}</span>
-                      <span className="font-mono font-medium text-ink-900">
-                        {displayQty.toFixed(2)} {displayUnit}
+                      <span className="text-right">
+                        {changed && (
+                          <span className="block text-[11px] text-ink-400 line-through">
+                            Original: {formatNumber(originalDisplayQty, 2)} {displayUnit}
+                          </span>
+                        )}
+                        <span className="font-mono font-medium text-ink-900">
+                          {changed && <span className="text-[11px] font-sans text-warning-600 mr-1">Actual:</span>}
+                          {formatNumber(displayQty, 2)} {displayUnit}
+                        </span>
                       </span>
                     </div>
                   );
@@ -311,24 +370,93 @@ export default function ProductionDetailModal({ open, onClose, batch }) {
 
           {planCost.breakdown.length > 0 && (
             <div>
-              <p className="text-sm font-semibold text-ink-900 mb-2">Packaging Distribution</p>
-              <div className="divide-y divide-surface-border border border-surface-border rounded-xl overflow-hidden">
-                {planCost.breakdown.map((line) => (
-                  <div key={line.id} className="px-3.5 py-2.5 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-ink-700">{line.bottle?.name || "Unknown bottle"}</span>
-                      <span className="font-mono font-semibold text-ink-900">{line.units} × {formatCurrency(line.lineCost / line.units)} = {formatCurrency(line.lineCost)}</span>
-                    </div>
-                    <p className="text-[11px] text-ink-400 mt-0.5">
-                      {[line.sticker && "Sticker", line.cap && "Cap", line.shrink && "Shrink", line.carton && `Carton (${line.cartonCount})`, line.tape && "Tape"].filter(Boolean).join(" · ") || "Bottle only"}
-                    </p>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between px-3.5 py-2.5 text-sm bg-ink-900/[0.02] font-semibold">
-                  <span className="text-ink-900">Total Packaging Cost</span>
-                  <span className="font-mono text-ink-900">{formatCurrency(planCost.totalCost)}</span>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold text-ink-900">Packaging Produced</p>
+                <span className={clsx("text-xs font-semibold", Math.abs(planCost.totalMl - batch.quantityL * 1000) < 1 ? "text-success-600" : "text-warning-600")}>
+                  {formatNumber(planCost.totalMl / 1000, 2)}L / {batch.quantityL}L {Math.abs(planCost.totalMl - batch.quantityL * 1000) < 1 ? "✓" : "⚠"}
+                </span>
+              </div>
+              <div className="border border-surface-border rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-ink-900/[0.02] text-[11px] font-semibold text-ink-400 uppercase tracking-wide">
+                      <th className="text-left px-3.5 py-2">Packaging</th>
+                      <th className="text-right px-3.5 py-2">Quantity</th>
+                      <th className="text-right px-3.5 py-2">Total Volume</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-border">
+                    {planCost.breakdown.map((line) => (
+                      <tr key={line.id}>
+                        <td className="px-3.5 py-2.5">
+                          <span className="text-ink-700">{line.bottle?.name || "Unknown bottle"}</span>
+                          <p className="text-[11px] text-ink-400">
+                            {[line.sticker && "Sticker", line.cap && "Cap", line.shrink && "Shrink", line.carton && `Carton (${line.cartonCount})`, line.tape && "Tape"].filter(Boolean).join(" · ") || "Bottle only"}
+                          </p>
+                        </td>
+                        <td className="px-3.5 py-2.5 text-right font-mono text-ink-900">{line.units}</td>
+                        <td className="px-3.5 py-2.5 text-right font-mono text-ink-900">{formatNumber(line.lineMl / 1000, 2)} L</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-ink-900/[0.02] font-semibold">
+                      <td className="px-3.5 py-2.5 text-ink-900">Total Produced</td>
+                      <td></td>
+                      <td className="px-3.5 py-2.5 text-right font-mono text-ink-900">{formatNumber(planCost.totalMl / 1000, 2)} L</td>
+                    </tr>
+                    <tr>
+                      <td className="px-3.5 py-2.5 text-ink-900">Total Packaging Cost</td>
+                      <td></td>
+                      <td className="px-3.5 py-2.5 text-right font-mono text-ink-900">{formatCurrency(planCost.totalCost)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              {!packagingMatches && !isCompleted && batch.status !== "rejected" && (
+                <div className="mt-2.5 border border-warning-200 bg-warning-50 rounded-xl p-3">
+                  <p className="text-xs text-warning-700 font-medium">
+                    ⚠ Packaging quantity does not match the batch quantity. Please adjust the packaging distribution
+                    before finalizing, or explicitly allow the mismatch below (e.g. for known wastage/yield loss).
+                  </p>
+                  <label className="flex items-center gap-2 mt-2 text-xs text-ink-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={allowPackagingMismatch}
+                      onChange={(e) => setAllowPackagingMismatch(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded accent-warning-600"
+                    />
+                    Allow finalizing with this mismatch (wastage/yield adjustment)
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
+          {finalCost && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-semibold text-ink-900">Final Cost</p>
+                {finalCost.frozen && <Badge tone="neutral">Recorded at production time</Badge>}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="bg-ink-900/[0.02] border border-surface-border rounded-xl px-3.5 py-2.5">
+                  <p className="text-[11px] text-ink-400 mb-0.5">Total Batch Cost</p>
+                  <p className="font-mono font-bold text-ink-900">{formatCurrency(finalCost.totalCost)}</p>
+                </div>
+                <div className="bg-ink-900/[0.02] border border-surface-border rounded-xl px-3.5 py-2.5">
+                  <p className="text-[11px] text-ink-400 mb-0.5">Cost Per Liter</p>
+                  <p className="font-mono font-bold text-ink-900">{formatCurrency(finalCost.costPerLiter)}</p>
+                </div>
+                <div className="bg-brand-50/60 border border-surface-border rounded-xl px-3.5 py-2.5">
+                  <p className="text-[11px] text-ink-400 mb-0.5">Cost Per Package</p>
+                  <p className="font-mono font-bold text-brand-700">{finalCost.costPerUnit > 0 ? formatCurrency(finalCost.costPerUnit) : "—"}</p>
                 </div>
               </div>
+              <p className="text-[11px] text-ink-400 mt-2">
+                Includes Labour {formatCurrency(finalCost.overhead.labour)} · Electricity {formatCurrency(finalCost.overhead.electricity)} ·
+                Transport {formatCurrency(finalCost.overhead.transport)} · Misc {formatCurrency(finalCost.overhead.misc)} (from Settings defaults)
+              </p>
             </div>
           )}
 

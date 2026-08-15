@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { History, Search, Trash2 } from "lucide-react";
+import { History, Search, Trash2, XCircle } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
 import Badge from "../../components/ui/Badge";
@@ -15,14 +15,15 @@ import ProductionDetailModal from "../Production/ProductionDetailModal";
 import { usePermissions } from "../../utils/permissions";
 
 export default function BatchHistory() {
-  const { batches, deleteBatch } = useProductionStore();
+  const { batches, deleteBatch, cancelBatch } = useProductionStore();
   const products = useProductStore((s) => s.products);
   const push = useToastStore((s) => s.push);
-  const { role } = usePermissions();
+  const { role, canEdit } = usePermissions();
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
   const [viewBatch, setViewBatch] = useState(null);
 
   function productName(id) {
@@ -56,8 +57,11 @@ export default function BatchHistory() {
       key: "status",
       header: "Status",
       render: (row) => (
-        <Badge tone={row.status === "completed" ? "success" : row.status === "rejected" ? "danger" : "warning"} dot>
-          {row.status === "completed" ? "Completed" : row.status === "rejected" ? "Rejected" : "Planned"}
+        <Badge
+          tone={row.status === "completed" ? "success" : row.status === "rejected" ? "danger" : row.status === "cancelled" ? "neutral" : "warning"}
+          dot
+        >
+          {row.status === "completed" ? "Completed" : row.status === "rejected" ? "Rejected" : row.status === "cancelled" ? "Cancelled" : "Planned"}
         </Badge>
       ),
     },
@@ -76,15 +80,31 @@ export default function BatchHistory() {
       key: "actions",
       header: "",
       align: "right",
-      render: (row) =>
-        // Only Super Admin can delete a batch record, regardless of its
-        // status — needed so Super Admin can actually clean up test/mistake
-        // entries from history, not just batches still in "planned" state.
-        role === "Super Admin" && (
-          <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors">
-            <Trash2 size={15} />
-          </button>
-        ),
+      render: (row) => (
+        <div className="flex items-center justify-end gap-1">
+          {/* Still "planned" (not yet confirmed) — any authorized user can
+              cancel a mistaken/accidental batch. No inventory was ever
+              touched for a planned batch, so this is safe. */}
+          {row.status === "planned" && canEdit && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setCancelTarget(row); }}
+              className="p-2 text-ink-400 hover:text-warning-600 hover:bg-warning-50 rounded-lg transition-colors"
+              title="Cancel this production"
+            >
+              <XCircle size={15} />
+            </button>
+          )}
+          {/* Permanently deleting any batch record (planned, cancelled,
+              rejected, or a finalized "completed" one) stays Super Admin
+              only — completed batches already affected real inventory, so
+              this is a genuine historical-record deletion, not a quick undo. */}
+          {role === "Super Admin" && (
+            <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(row); }} className="p-2 text-ink-400 hover:text-danger-500 hover:bg-danger-50 rounded-lg transition-colors" title="Permanently delete">
+              <Trash2 size={15} />
+            </button>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -119,6 +139,14 @@ export default function BatchHistory() {
             ? "This batch already deducted raw material/packaging stock when it was confirmed — deleting the record here does NOT restore that stock. Only delete this if you're cleaning up a genuine mistake/test entry."
             : "This removes the batch record permanently. This cannot be undone."
         }
+      />
+
+      <ConfirmDialog
+        open={!!cancelTarget}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => { cancelBatch(cancelTarget.id); push(`Batch ${cancelTarget.batchNumber} cancelled`, "info"); setCancelTarget(null); }}
+        title="Cancel this production?"
+        description="This production has not been finalized yet — no inventory has been deducted. It will be kept in Batch History marked as Cancelled for the record, but won't count as a completed batch."
       />
     </div>
   );

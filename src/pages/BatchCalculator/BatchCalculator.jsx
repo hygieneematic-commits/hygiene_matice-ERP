@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
-import { Beaker, PackageOpen, Receipt, IndianRupee, ClipboardList, FlaskConical, ChevronRight, ChevronDown, ListTree } from "lucide-react";
+import { Beaker, PackageOpen, Receipt, IndianRupee, ClipboardList, FlaskConical, ChevronRight, ChevronDown, ListTree, RotateCcw, Save } from "lucide-react";
 import PageHeader from "../../components/ui/PageHeader";
 import Card from "../../components/ui/Card";
+import Badge from "../../components/ui/Badge";
 import { Select, Input, Label } from "../../components/ui/Field";
 import LiquidVisualizer from "../../components/charts/LiquidVisualizer";
 import { useProductStore } from "../../store/useProductStore";
@@ -25,6 +26,9 @@ import {
   computeGstLedger,
 } from "../../utils/batchCalcEngine";
 import { formatCurrency, formatNumber } from "../../utils/formatters";
+import { fromBaseUnit } from "../../utils/units";
+import { usePermissions } from "../../utils/permissions";
+import { useToastStore } from "../../store/useToastStore";
 import clsx from "clsx";
 
 const BATCH_PRESETS = [10, 25, 50, 100, 250, 500, 1000];
@@ -32,7 +36,9 @@ const GST_PRESETS = [0, 5, 12, 18, 28];
 
 export default function BatchCalculator() {
   const products = useProductStore((s) => s.products);
-  const { getFormula } = useFormulaStore();
+  const { getFormula, updateIngredient } = useFormulaStore();
+  const { canEdit } = usePermissions();
+  const push = useToastStore((s) => s.push);
   const rawMaterials = useRawMaterialStore((s) => s.rawMaterials);
   const rawMaterialsById = useMemo(() => {
     const m = {};
@@ -193,7 +199,58 @@ export default function BatchCalculator() {
     () => computeFormulaLines(formula?.ingredients, batchLiters, rawMaterialsById),
     [formula, batchLiters, rawMaterialsById]
   );
-  const rawMaterialResult = useMemo(() => computeRawMaterialCost(formulaLines), [formulaLines]);
+
+  // Batch-specific ingredient adjustment — lets someone test "what if I used
+  // 5.5kg instead of 5kg" without touching the Formula Library master. Once
+  // edited, further batch-size changes stop silently re-scaling over the
+  // edit (use Reset to go back to the auto-scaled formula).
+  const [editableLines, setEditableLines] = useState(formulaLines);
+  const [formulaEdited, setFormulaEdited] = useState(false);
+
+  useEffect(() => {
+    if (!formulaEdited) setEditableLines(formulaLines);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formulaLines, formulaEdited]);
+
+  useEffect(() => {
+    setFormulaEdited(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId]);
+
+  const rawMaterialResult = useMemo(() => computeRawMaterialCost(editableLines), [editableLines]);
+
+  function handleIngredientQtyChange(index, displayQty) {
+    setEditableLines((lines) =>
+      lines.map((l, i) => {
+        if (i !== index) return l;
+        const showLarge = l.requiredBaseQty >= 1000;
+        const newBaseQty = showLarge ? safeNumber(displayQty) * 1000 : safeNumber(displayQty);
+        return { ...l, requiredBaseQty: newBaseQty };
+      })
+    );
+    setFormulaEdited(true);
+  }
+
+  function handleResetFormula() {
+    setEditableLines(formulaLines);
+    setFormulaEdited(false);
+    push("Reset to original formula", "info");
+  }
+
+  function handleSaveToMasterFormula() {
+    if (!formula?.ingredients?.length) return;
+    editableLines.forEach((line) => {
+      const original = formula.ingredients.find((ing) => ing.rawMaterialId === line.rawMaterialId);
+      if (!original) return; // newly-added-in-batch ingredients aren't pushed to the master formula from here
+      // requiredBaseQty is for the WHOLE batch — convert back to "per 1 Liter"
+      // (the unit the master formula is defined in) before saving.
+      const per1LBaseQty = batchLiters > 0 ? line.requiredBaseQty / batchLiters : 0;
+      const newQuantity = fromBaseUnit(per1LBaseQty, original.unit);
+      updateIngredient(productId, original.id, { quantity: newQuantity });
+    });
+    setFormulaEdited(false);
+    push("Master formula updated in Formula Library", "success");
+  }
 
   // STEP 4 — Packaging Engine
   const selectedBottle = packagingById[bottleId];
@@ -335,8 +392,32 @@ export default function BatchCalculator() {
 
           {/* STEP 3 — Raw Material Cost */}
           <Card padding="p-0">
-            <div className="px-5 py-4 border-b border-surface-border">
-              <SectionLabel n={2} title="Raw Material Cost" icon={Beaker} noMargin />
+            <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <SectionLabel n={2} title="Raw Material Cost" icon={Beaker} noMargin />
+                {formulaEdited && <Badge tone="warning">Batch-specific adjustment</Badge>}
+              </div>
+              {canEdit && (
+                <div className="flex items-center gap-2">
+                  {formulaEdited && (
+                    <>
+                      <button
+                        onClick={handleResetFormula}
+                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-ink-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg transition-colors"
+                      >
+                        <RotateCcw size={12} /> Reset to Original Formula
+                      </button>
+                      <button
+                        onClick={handleSaveToMasterFormula}
+                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-brand-gradient text-white rounded-lg"
+                        title="Only Super Admin / Admin / Production Manager can update the master formula"
+                      >
+                        <Save size={12} /> Save Changes to Master Formula
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -351,13 +432,38 @@ export default function BatchCalculator() {
                 <tbody>
                   {rawMaterialResult.lines.map((line, i) => {
                     const isKg = line.type === "weight";
-                    const displayQty = line.requiredBaseQty >= 1000 ? line.requiredBaseQty / 1000 : line.requiredBaseQty;
-                    const displayUnit = line.requiredBaseQty >= 1000 ? (isKg ? "Kg" : "L") : isKg ? "gm" : "ml";
+                    const showLarge = line.requiredBaseQty >= 1000;
+                    const displayQty = showLarge ? line.requiredBaseQty / 1000 : line.requiredBaseQty;
+                    const displayUnit = showLarge ? (isKg ? "Kg" : "L") : isKg ? "gm" : "ml";
+                    const original = formulaLines.find((l) => l.rawMaterialId === line.rawMaterialId);
+                    const pctChange = original && original.requiredBaseQty > 0
+                      ? ((line.requiredBaseQty - original.requiredBaseQty) / original.requiredBaseQty) * 100
+                      : 0;
                     return (
                       <tr key={i} className="border-b border-surface-border last:border-0">
                         <td className="px-5 py-2.5 font-medium text-ink-900">{line.rawMaterialName}</td>
-                        <td className="px-5 py-2.5 text-right font-mono text-ink-700">
-                          {formatNumber(displayQty, 2)} {displayUnit}
+                        <td className="px-5 py-2.5 text-right">
+                          {canEdit ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              {Math.abs(pctChange) > 0.01 && (
+                                <span className={clsx("text-[10px] font-semibold", pctChange > 0 ? "text-success-600" : "text-danger-500")}>
+                                  {pctChange > 0 ? "+" : ""}{formatNumber(pctChange, 1)}%
+                                </span>
+                              )}
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={displayQty}
+                                onChange={(e) => handleIngredientQtyChange(i, e.target.value)}
+                                className="!w-20 !py-1 !text-xs text-right"
+                              />
+                              <span className="text-xs text-ink-400 w-6">{displayUnit}</span>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-ink-700">
+                              {formatNumber(displayQty, 2)} {displayUnit}
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-2.5 text-right font-mono text-ink-500">
                           {formatCurrency(line.unitPrice)}/{isKg ? "Kg" : "L"}

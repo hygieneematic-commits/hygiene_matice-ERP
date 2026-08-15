@@ -5,7 +5,9 @@ import { useFormulaStore } from "./useFormulaStore";
 import { useRawMaterialStore } from "./useRawMaterialStore";
 import { usePackagingStore } from "./usePackagingStore";
 import { useProductStore } from "./useProductStore";
-import { scaleFormula, calculateComponentPlanCost } from "../utils/costEngine";
+import { useSettingsStore } from "./useSettingsStore";
+import { scaleFormula, calculateComponentPlanCost, calculateOverheadCost } from "../utils/costEngine";
+import { computeFormulaLines, computeRawMaterialCost } from "../utils/batchCalcEngine";
 
 export const useProductionStore = create(
   firestoreSync(
@@ -18,7 +20,7 @@ export const useProductionStore = create(
       getById: (id) => get().batches.find((b) => b.id === id),
 
       // Create a planned batch (does NOT touch inventory yet)
-      createBatch: ({ productId, quantityL, operator, supervisor, shift, notes, mfgDate, expiryDate, startTime, endTime, yieldPercent, packagingPlan, formulaOverride, formulaEdited }) => {
+      createBatch: ({ productId, quantityL, operator, supervisor, shift, notes, mfgDate, expiryDate, startTime, endTime, yieldPercent, packagingPlan, formulaOverride, formulaOriginal, formulaEdited }) => {
         const product = useProductStore.getState().getById(productId);
         const batch = {
           id: generateId("batch"),
@@ -42,6 +44,7 @@ export const useProductionStore = create(
           // written back to the Formula Library master formula. `null` means
           // "use the master formula, scaled to quantityL, as usual".
           formulaOverride: formulaOverride || null,
+          formulaOriginal: formulaOriginal || null,
           formulaEdited: !!formulaEdited,
           qc: null,
         };
@@ -57,6 +60,37 @@ export const useProductionStore = create(
         const product = useProductStore.getState().getById(batch.productId);
         const rawMaterialsById = useRawMaterialStore.getState().getByIdMap();
         const packagingById = usePackagingStore.getState().getByIdMap();
+        const settings = useSettingsStore.getState().settings;
+
+        // ---------------------------------------------------------------
+        // Freeze a cost snapshot BEFORE deducting stock, using whatever
+        // rates are live right now. This is what Batch History / Reports
+        // will show for this batch from now on — a future raw material or
+        // packaging price change must NOT silently change what an already
+        // -completed batch is recorded as having cost.
+        // ---------------------------------------------------------------
+        let rawMaterialLines;
+        if (batch.formulaOverride?.length) {
+          rawMaterialLines = batch.formulaOverride;
+        } else {
+          const formula = useFormulaStore.getState().getFormula(batch.productId);
+          rawMaterialLines = computeFormulaLines(formula.ingredients, batch.quantityL, rawMaterialsById);
+        }
+        const rawMaterialCostResult = computeRawMaterialCost(rawMaterialLines);
+        const packagingCostResult = batch.packagingPlan?.length
+          ? calculateComponentPlanCost(batch.packagingPlan, packagingById)
+          : { breakdown: [], totalCost: 0, totalMl: 0 };
+        const overheadResult = calculateOverheadCost(batch.quantityL, settings);
+        const totalCost = rawMaterialCostResult.totalCost + packagingCostResult.totalCost + overheadResult.total;
+        const costSnapshot = {
+          rawMaterial: { total: rawMaterialCostResult.totalCost, lines: rawMaterialCostResult.lines },
+          packaging: { total: packagingCostResult.totalCost, breakdown: packagingCostResult.breakdown },
+          overhead: overheadResult,
+          totalCost,
+          costPerLiter: batch.quantityL > 0 ? totalCost / batch.quantityL : 0,
+          formulaVersion: batch.formulaEdited ? "batch-specific adjustment" : (useFormulaStore.getState().getFormula(batch.productId).versions?.length || 1),
+          frozenAt: new Date().toISOString(),
+        };
 
         // A batch-specific formula override (edited at creation time) takes
         // priority over the master Formula Library — deduct exactly what was
@@ -98,11 +132,23 @@ export const useProductionStore = create(
         }
 
         set({
-          batches: get().batches.map((b) => (b.id === batchId ? { ...b, status: "completed" } : b)),
+          batches: get().batches.map((b) => (b.id === batchId ? { ...b, status: "completed", costSnapshot } : b)),
         });
       },
 
       deleteBatch: (batchId) => set({ batches: get().batches.filter((b) => b.id !== batchId) }),
+
+      // Cancel a batch that hasn't been confirmed yet — no inventory was
+      // ever deducted for a "planned" batch, so this is safe for any
+      // authorized (canEdit) user, not just Super Admin. The record stays
+      // in Batch History as "Cancelled" (audit trail of the mistake) rather
+      // than silently vanishing, but it's excluded from production totals.
+      cancelBatch: (batchId, reason) =>
+        set({
+          batches: get().batches.map((b) =>
+            b.id === batchId ? { ...b, status: "cancelled", cancelReason: reason || "", cancelledAt: new Date().toISOString() } : b
+          ),
+        }),
 
       updateBatch: (batchId, patch) =>
         set({ batches: get().batches.map((b) => (b.id === batchId ? { ...b, ...patch } : b)) }),
